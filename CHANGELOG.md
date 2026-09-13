@@ -106,12 +106,49 @@ divided across parallel slots. The server defaults to four slots with `kv_unifie
 and each one gets the full 8192, so `--parallel 1` would cost concurrency for no gain and
 is deliberately absent from the commands.
 
+- **`releases/embeddings.yaml`** — llama.cpp serving `nomic-embed-text-v1.5` in an
+  `embeddings` namespace, reached through the existing `agentgateway-external` Gateway on
+  `/v1/embeddings`, with the weights cached in a PVC by an initContainer. Added to
+  `releases/kustomization.yaml` only after the deployment was verified in a live cluster —
+  see below.
+
+- **ToDo — verification suite**
+  ([docs/todo/embeddings-verification.md](docs/todo/embeddings-verification.md)).
+  Seven copy-pasteable checks with the expected values recorded from the run, to be
+  repeated after an image or model bump. It leads with the context check, since a capped
+  context truncates documents at index time without ever raising an error, and it ends by
+  stating what it does *not* cover — one sentence pair detects a broken configuration, not
+  retrieval quality on a real corpus.
+
+### Verified in cluster
+
+Deployed to KinD in a 2-core Codespace and checked end to end: rollout completed,
+`n_ctx_slot = 8192` with no capping, the HTTPRoute reported `Accepted=True` and
+`ResolvedRefs=True`, `/v1/embeddings` through the gateway at `172.18.0.5` returned 768
+dimensions, and kagent's catch-all `/` still returned 200 — confirming the longest-prefix
+precedence the route depends on.
+
+The semantic test through the gateway returned **0.8209 related against 0.4379 unrelated,
+identical to the local run**. Same model, same flags, same numbers on different hardware,
+which is the evidence that the configuration is reproducible rather than incidentally
+working.
+
+One failure was worth recording. The first rollout stalled in `Init:ImagePullBackOff`, and
+the pull error was a DNS `i/o timeout` from the node rather than a registry rejection —
+the nested-Docker egress blackhole that `scripts/fix-egress.sh` exists for, which reported
+`legacy FORWARD policy is DROP, which blackholes user-defined Docker bridges` and cleared
+it. The tempting read was a Docker Hub rate limit, which would have led to swapping the
+initContainer image; that would have fixed nothing, since the blackhole takes out every
+registry including the one serving the main image.
+
 ### Notes
 
-The cluster side remains design-only. No manifest under `releases/` changed and nothing is
-deployed — `releases/embeddings.yaml` is specified in the ToDo but deliberately not added
-to `releases/kustomization.yaml`, since CODEBASE.md forbids publishing a release that has
-not been verified green with `flux get all`.
+`releases/embeddings.yaml` is now in `releases/kustomization.yaml` and will ship in the
+next OCI artifact. Publishing it was gated on the verification above, per CODEBASE.md.
+
+A fork still needs the `oci_registry` override from the cluster runbook before `make push`
+means anything: without it the cluster reconciles the upstream artifact and reports Ready
+while ignoring the fork's own releases entirely.
 
 ### Preparation cost
 

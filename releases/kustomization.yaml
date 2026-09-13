@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - agentgateway.yaml
   - agentregistry.yaml
+  - embeddings.yaml
   - kagent.yaml
   - phoenix.yaml
   - qdrant.yaml
