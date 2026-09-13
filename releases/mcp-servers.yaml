@@ -18,10 +18,13 @@ spec:
       - mcp-server-qdrant
     env:
       QDRANT_URL: http://qdrant.qdrant:6333
-      COLLECTION_NAME: abox
-      # fastembed, 384 dims. Not the 768-dim nomic that llm-d and llama.cpp
-      # serve -- this collection is the agent's own memory, not theirs.
-      EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+      # New collection: the vector is named after the model
+      # (fast-nomic-embed-text-v1-5), so the old MiniLM one cannot be reused.
+      COLLECTION_NAME: abox-nomic
+      # Same model llm-d and llama.cpp serve, but embedded in-process by
+      # fastembed, not over /v1/embeddings. 768 dims. Downloaded from
+      # HuggingFace on first start.
+      EMBEDDING_MODEL: nomic-ai/nomic-embed-text-v1.5
     resources:
       requests:
         cpu: 100m
