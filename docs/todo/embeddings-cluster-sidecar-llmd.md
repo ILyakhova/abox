@@ -73,7 +73,7 @@ independent). Re-resolve only when deliberately moving the image forward.
 
 - [ ] Digest in the manifest matches what `docker pull` reports, or was updated on purpose.
 
-### A2. Create `releases/embeddings.yaml`
+### A2. Review `releases/embeddings.yaml`
 
 Conventions this manifest is obeying, each of which is a `[critical]` in
 [REVIEW.md](../../REVIEW.md):
@@ -87,169 +87,13 @@ Conventions this manifest is obeying, each of which is a `[critical]` in
   `releases` Kustomization already depends on `releases-crds` for the Gateway API types.
 - Image pinned by digest.
 
-```yaml
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: embeddings
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: model-cache
-  namespace: embeddings
-spec:
-  accessModes: [ReadWriteOnce]
-  resources:
-    requests:
-      storage: 2Gi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: embeddings
-  namespace: embeddings
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: embeddings
-  template:
-    metadata:
-      labels:
-        app: embeddings
-    spec:
-      # Fetch the GGUF once into the PVC. Keeping the download out of the main
-      # container means a pod restart does not re-pull 140 MiB.
-      initContainers:
-      - name: fetch-model
-        image: curlimages/curl:8.11.1
-        command:
-        - sh
-        - -c
-        - |
-          set -eu
-          f=/models/nomic-embed-text-v1.5.Q8_0.gguf
-          [ -s "$f" ] && exit 0
-          curl -fL -o "$f.tmp" \
-            https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF/resolve/main/nomic-embed-text-v1.5.Q8_0.gguf
-          mv "$f.tmp" "$f"
-        volumeMounts:
-        - name: models
-          mountPath: /models
-      containers:
-      - name: llama-server
-        # Resolved 2026-09-13 by the command in A1; re-resolve to move the image forward.
-        image: ghcr.io/ggml-org/llama.cpp@sha256:cbcdcb52d484e08e23bfc0135afa5beadd2d540513bbb7c65b233231fa033ff4
-        args:
-        - -m
-        - /models/nomic-embed-text-v1.5.Q8_0.gguf
-        - --embeddings
-        - --pooling
-        - mean
-        - -c
-        - "8192"
-        - -b
-        - "8192"
-        - -ub
-        - "8192"
-        - --rope-scaling
-        - yarn
-        # 0.25, not the 0.75 the model card prints: llama.cpp caps a slot at
-        # n_ctx_train / rope_freq_scale, and this GGUF reports n_ctx_train = 2048,
-        # so 0.75 silently caps the context at 2730 instead of 8192.
-        - --rope-freq-scale
-        - "0.25"
-        - --host
-        - 0.0.0.0
-        - --port
-        - "8080"
-        ports:
-        - name: http
-          containerPort: 8080
-        volumeMounts:
-        - name: models
-          mountPath: /models
-        resources:
-          requests:
-            cpu: 250m
-            memory: 512Mi
-          # Sized for a 2-core / 8 GB Codespace, which is where this sandbox
-          # usually runs. That host is already carrying three KinD nodes plus
-          # agentgateway, kagent with its postgres, qdrant and phoenix, so
-          # cpu: "2" would let the embedder claim the whole machine and starve
-          # the control plane. Raise both on a larger host.
-          limits:
-            cpu: "1"
-            memory: 1Gi
-        # /health returns 503 until weights are loaded. The budget is generous for
-        # the same reason releases/phoenix.yaml widened its startup probe: KinD is
-        # slow, and a tight probe restarts the container before it ever binds.
-        # 10 minutes, because a CPU-capped embedder on a busy node loads slowly.
-        startupProbe:
-          httpGet: {path: /health, port: http}
-          periodSeconds: 5
-          failureThreshold: 120
-        readinessProbe:
-          httpGet: {path: /health, port: http}
-          periodSeconds: 10
-      volumes:
-      - name: models
-        persistentVolumeClaim:
-          claimName: model-cache
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: embeddings
-  namespace: embeddings
-spec:
-  selector:
-    app: embeddings
-  ports:
-  - name: http
-    port: 8080
-    targetPort: http
----
-apiVersion: gateway.networking.k8s.io/v1beta1
-kind: ReferenceGrant
-metadata:
-  name: embeddings
-  namespace: embeddings
-spec:
-  from:
-  - group: gateway.networking.k8s.io
-    kind: HTTPRoute
-    namespace: embeddings
-  to:
-  - group: ""
-    kind: Service
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: embeddings
-  namespace: embeddings
-spec:
-  parentRefs:
-  - name: agentgateway-external
-    namespace: agentgateway-system
-  rules:
-  # kagent already claims '/' on this Gateway. Gateway API resolves overlapping
-  # prefixes by longest match, so '/v1/embeddings' wins here without touching
-  # releases/kagent.yaml. Shortening this prefix would break that.
-  - matches:
-    - path:
-        type: PathPrefix
-        value: /v1/embeddings
-    backendRefs:
-    - name: embeddings
-      namespace: embeddings
-      port: 8080
-```
+The manifest itself lives at [`releases/embeddings.yaml`](../../releases/embeddings.yaml).
+Read it there. It was inlined in this document while it was still a proposal; now that the
+file exists, a second copy here would only drift from it.
 
-- [ ] File created at `releases/embeddings.yaml`.
-- [ ] `embeddings.yaml` added to the `resources:` list in `releases/kustomization.yaml`.
+- [ ] After any edit, `releases/embeddings.yaml` still satisfies the four conventions above.
+- [ ] It is listed under `resources:` in `releases/kustomization.yaml`. That listing is what
+      puts it into the OCI artifact, so add it only once A3 passes.
 
 ### A3. Verify before publishing
 
@@ -270,39 +114,24 @@ The first rollout waits on the initContainer pulling 140 MiB from HuggingFace, s
 the full timeout before concluding anything is wrong. `kubectl -n embeddings logs -l
 app=embeddings -c fetch-model` shows the download.
 
-- [ ] Deployment is Available.
-- [ ] HTTPRoute shows `Accepted=True` **and** `ResolvedRefs=True`. If `ResolvedRefs` is
-      False, the ReferenceGrant is the first thing to check.
+Then run the full suite — it covers the rollout, the context cap, the route conditions, the
+call through the gateway, kagent's untouched catch-all, and the semantic check, each with
+the value it should return:
 
-In-cluster call:
+**→ [Verification suite](./embeddings-verification.md)**
 
-```bash
-kubectl -n embeddings run curl --rm -it --image=curlimages/curl:8.11.1 --restart=Never -- \
-  curl -s http://embeddings.embeddings.svc.cluster.local:8080/v1/embeddings \
-    -H 'Content-Type: application/json' \
-    -d '{"model":"nomic","input":["search_query: hello"]}'
-```
-
-Through the gateway:
-
-```bash
-GW=$(kubectl get svc -n agentgateway-system -o jsonpath='{.items[?(@.spec.type=="LoadBalancer")].status.loadBalancer.ingress[0].ip}')
-curl -s "http://$GW/v1/embeddings" -H 'Content-Type: application/json' \
-  -d '{"model":"nomic","input":["search_query: hello"]}' | jq '.data[0].embedding | length'
-# 768
-```
-
-- [ ] Both calls return 768 dims.
-- [ ] Run the semantic acceptance test from the
-      [local ToDo §5](./embeddings-local-llama-cpp.md#5-acceptance-test--the-vectors-must-be-meaningful)
-      against the cluster URL. A 768-length array is not proof of correctness.
+- [ ] Every check in that runbook passes. A 768-length array on its own proves the server
+      answered, not that it embedded correctly.
 
 ### A4. Publish
 
+Only after A3 is green. A broken release published to GHCR is reconciled automatically.
+
+- [ ] `embeddings.yaml` added to `resources:` in `releases/kustomization.yaml`.
 - [ ] `flux get all -A` shows everything Ready.
 - [ ] `make push`. Remember the lexicographic tag rule: if the patch would exceed 9, tag
       `vX.Y+1.0` by hand instead.
-- [ ] Update the component table in [README.md](../../README.md).
+- [ ] Component table in [README.md](../../README.md) lists the new service.
 
 ---
 
