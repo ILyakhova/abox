@@ -130,8 +130,9 @@ move them slightly, so don't mix output from both into one collection.
 
 ### What to watch when evaluating
 
-llm-d's cost here is startup and footprint; its benefit only shows up under
-concurrency and as models are added.
+Both backends run the same engine on the same weights, so llm-d's cost is the
+extra machinery; its benefit only shows up under concurrency and as models are
+added.
 
 ```bash
 kubectl get pods -n llm-d -n llama-cpp                       # readiness gap on first boot
@@ -140,42 +141,13 @@ kubectl logs -n llm-d deploy/llm-d-pool-epp                  # endpoint picker d
 kubectl top pod -n llm-d; kubectl top pod -n llama-cpp       # steady-state cost
 ```
 
-- **Both backends are llama.cpp.** vLLM was the original backend for #1 and does
-  not work on CPU here: with `--runner pooling`, the model loads and the server
-  answers `/health` and `/v1/models`, but the worker process is killed by a
-  signal on the first forward pass and every `/v1/embeddings` returns 500. It
-  reproduces at `float16` and `bfloat16` alike and with the memory limit raised
-  to 9Gi, so it is not OOM. `releases/llmd.yaml` keeps the full llm-d stack —
-  modelservice chart, InferencePool, EPP, InferenceObjective — and only swaps
-  the serving container.
-
-  Two more things were ruled out along the way, both worth knowing:
-
-  **`VLLM_USE_RUST_FRONTEND=1` cannot serve embeddings.** The Rust frontend
-  registers only `/health`, `/metrics`, `/load`, `/version`, `/v1/models`,
-  `/v1/completions`, `/v1/chat/completions`, `/tokenize`, `/detokenize` and
-  `/inference/v1/generate` (`rust/src/server/src/routes.rs`). There is no
-  `/v1/embeddings`, so a pooling runner behind it 404s every embed request
-  while looking perfectly healthy.
-
-  **`--max-model-len 8192` is rejected**, though the reference cluster runs it.
-  vLLM derives the limit as `min()` over every length key in the config
-  (`derive_max_model_len_and_key`), and this model's config carries both
-  `max_position_embeddings: 2048` and `n_positions: 8192`, so 2048 wins.
-  `--trust-remote-code` makes no difference. 2048 is also the model's real
-  `max_trained_positions`.
-
-- **What the comparison is now.** Not vLLM vs llama.cpp, but *llm-d-managed*
-  vs *plain Deployment* — same engine, same weights, same vectors. What #1 adds
-  is the InferencePool, the endpoint picker, and the modelservice chart's
-  prefill/decode shape. That is the thing actually being evaluated.
-
-- **Startup**: neither backend contacts HuggingFace. #2 has the weights in its
-  own image layer; #1 mounts them from an image volume, so they are pulled once
-  per node by the kubelet and cached like any other image.
-
-- **Concurrency**: llama.cpp is fixed at 8 slots (`--parallel 8`). vLLM batches
-  continuously — this is where it should pull ahead.
+- **Both backends are llama.cpp**, same weights, same vectors. The comparison is
+  *llm-d-managed* vs *plain Deployment*: what #1 adds is the InferencePool, the
+  endpoint picker and the modelservice chart's prefill/decode shape.
+- **Startup**: neither backend contacts HuggingFace. #2 carries the weights in
+  its own image layer; #1 mounts them from an image volume, pulled once per node
+  and cached by the kubelet like any other image.
+- **Concurrency**: both are fixed at 8 slots (`--parallel 8`).
 - **Scaling out**: raising `decode.replicas` puts real work in front of the EPP.
   At one replica the endpoint picker has nothing to choose between.
 
@@ -186,15 +158,15 @@ generation traffic, not a single-shot embed.
 
 ### Codespaces
 
-Both backends pull from HuggingFace at pod start, so fix egress **before**
-`make run` or every image and model pull times out:
+Neither backend pulls from HuggingFace, but the nodes still pull images, so fix
+egress **before** `make run` or every pull times out:
 
 ```bash
 make fix-egress
 ```
 
 A default 2-core/8GB Codespace is tight — the three kind nodes are containers
-sharing that one host. vLLM is sized to fit it (`releases/llmd.yaml`); raise the
+sharing that one host. Both backends are sized to fit it; raise the
 requests/limits if you run somewhere with real headroom.
 
 ## Adding components
