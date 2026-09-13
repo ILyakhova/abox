@@ -17,7 +17,7 @@ abox is a **local AI infrastructure sandbox**. A single `make run` provisions a 
 | Cluster | KinD (`kindest/node`, pinned via `var.node_image`) | v1.37.0 |
 | GitOps operator | Flux CD (Flux Operator + FluxInstance) | 2.x |
 | Infrastructure as code | OpenTofu | latest |
-| AI gateway | agentgateway | v2.2.1 |
+| AI gateway | agentgateway | 1.5.0 |
 | Agent runtime | kagent | 0.10.1 |
 | Gateway API | gateway-api (experimental channel) | v1.6.2 |
 | Vector database | qdrant | 1.19.1 |
