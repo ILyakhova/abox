@@ -66,6 +66,8 @@ make push   # bumps patch version, tags, pushes â†’ CI publishes OCI artifact â†
 | `releases/` | App HelmReleases + Gateway + HTTPRoutes |
 | `scripts/setup.sh` | Full setup script (`make run`) |
 | `.github/workflows/flux-push.yaml` | CI: publish `releases/` as OCI artifact on `v*` tags |
+| `docs/adr/` | Architecture decision records |
+| `docs/todo/` | Executable runbooks for the decisions in `docs/adr/` |
 
 ## Adding components
 
@@ -77,7 +79,8 @@ The CRD kustomization runs first (`wait: true`), apps run after (`dependsOn: rel
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md).
+See [CONTRIBUTING.md](./CONTRIBUTING.md). Notable changes are recorded in
+[CHANGELOG.md](./CHANGELOG.md).
 
 ## License
 

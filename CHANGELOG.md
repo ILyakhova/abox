@@ -1,0 +1,116 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Releases are the `v*` tags that CI publishes as OCI artifacts to
+`oci://ghcr.io/den-vasyliev/abox/releases`; the cluster reconciles from those.
+
+## [Unreleased]
+
+### Added
+
+- **ADR-0001 — text embedding model selection**
+  ([docs/adr/0001-text-embedding-model.md](docs/adr/0001-text-embedding-model.md)).
+  Selects `nomic-ai/nomic-embed-text-v1.5` as the default text embedding model, served as
+  `Q8_0` GGUF at 768 dimensions with an 8192-token context and mean pooling. Chosen for the
+  size-to-quality ratio on CPU-only KinD (137M parameters, ~140 MiB, MTEB 62.28), the 8k
+  context, Matryoshka Representation Learning, an Apache-2.0 licence, and first-class GGUF
+  builds. Records the alternatives — OpenAI `text-embedding-3-small`, `bge-m3`,
+  `Qwen3-Embedding`, `all-MiniLM-L6-v2`, `nomic-embed-text-v2-moe` — with the conditions
+  under which each displaces the default.
+
+  The ADR also establishes a **standing benchmark rule**: MTEB is a directional signal
+  only, and any embedding-backed retrieval path must be validated on its own corpus before
+  reaching users (~200 gold queries against ~10K distractor chunks; track Recall@K, MRR,
+  nDCG@10, hard-miss rate). Evidence: on a Ukrainian legal corpus, Qwen3-Embedding-8B
+  reached Recall@5 93.1% against OpenAI's 78.3%, and 3072 dimensions scored *worse* than
+  2048 — a result that is not predictable from any leaderboard. Phoenix is the place to
+  run it.
+
+- **ADR-0002 — in-cluster embedding runtime**
+  ([docs/adr/0002-embedding-runtime-in-cluster.md](docs/adr/0002-embedding-runtime-in-cluster.md)).
+  Scopes three deployment shapes rather than picking one: a shared Deployment + Service as
+  the abox default, the sidecar shape for ingestion and eval Jobs only, and llm-d deferred
+  with explicit adoption triggers.
+
+  llm-d is deferred rather than rejected. The integration is already half-present —
+  agentgateway has first-class Gateway API Inference Extension support, and kgateway 2.2
+  removed the inference path that did not go through agentgateway — but an embedding model
+  is a single-pass encoder with no KV cache and no decode phase, so KV-cache-aware routing
+  and prefill/decode disaggregation buy nothing, and llm-d targets accelerators that KinD
+  does not have. The realistic trigger is adding a *generative* model to abox.
+
+- **ToDo — run the model locally with llama.cpp**
+  ([docs/todo/embeddings-local-llama-cpp.md](docs/todo/embeddings-local-llama-cpp.md)).
+  Agent-executable runbook producing a callable OpenAI-compatible `/v1/embeddings`
+  endpoint on `localhost:8088`, via Docker (recommended), a native binary, or Ollama
+  (fallback). Covers the mandatory task-prefix contract (`search_document:` /
+  `search_query:` / `clustering:` / `classification:`), client-side Matryoshka truncation
+  with the required L2 re-normalization, and a two-stage Qdrant collection layout.
+
+  Acceptance is a **semantic** test, not a liveness check: a cosine-similarity assertion
+  that a related document outscores an unrelated one. Wrong pooling returns well-formed,
+  useless vectors, and a 768-length array proves nothing on its own.
+
+- **ToDo — run the model in the cluster (sidecar and llm-d)**
+  ([docs/todo/embeddings-cluster-sidecar-llmd.md](docs/todo/embeddings-cluster-sidecar-llmd.md)).
+  Part A: a shared Deployment + Service in an `embeddings` namespace, reached through the
+  existing `agentgateway-external` Gateway. Part B: a native sidecar
+  (`initContainers` + `restartPolicy: Always`) for ingestion Jobs. Part C: the llm-d
+  migration path, written out so future adoption is a substitution behind a stable URL.
+
+  The manifests are written against CODEBASE.md §Forbidden Patterns: namespace declared in
+  the same Kustomization as the workload, a ReferenceGrant for the cross-namespace
+  HTTPRoute, and the image pinned by digest because `ghcr.io/ggml-org/llama.cpp:server` is
+  a floating tag. The `/v1/embeddings` route coexists with kagent's catch-all `/` by
+  Gateway API longest-prefix precedence, so `releases/kagent.yaml` is untouched.
+
+  Part A opens with a **fork prerequisites** step covering three failure modes that are
+  silent rather than loud. `bootstrap/variables.tf` defaults `oci_registry` to the upstream
+  registry while CI derives its push target from `${{ github.repository }}`, so a fork
+  publishes to its own namespace but its cluster keeps reconciling upstream's artifact —
+  `flux get all` stays green and the fork's own changes never arrive. A freshly created
+  fork also carries no `v*` tags, which makes the version arithmetic in `make push`
+  generate a malformed tag, and the first GHCR publish creates a private package the
+  `OCIRepository` cannot pull.
+
+  Resource limits are sized for a 2-core / 8 GB Codespace, the usual host for this sandbox:
+  the embedder is capped at 1 CPU and 1 GiB rather than 2 and 2 GiB, since the node already
+  carries three KinD nodes plus agentgateway, kagent with postgres, qdrant and phoenix, and
+  a 2-CPU limit would let it starve the control plane. The startup probe budget is widened
+  to 10 minutes to match, because a CPU-capped embedder loads slowly on a busy node.
+
+### Notes
+
+These are design documents only. No manifest under `releases/` changed and nothing new is
+deployed — `releases/embeddings.yaml` is specified in the ToDo but deliberately not added
+to `releases/kustomization.yaml`, since CODEBASE.md forbids publishing a release that has
+not been verified green with `flux get all`.
+
+### Preparation cost
+
+Recorded for planning purposes — what it cost to produce the four documents above.
+
+Source material reviewed: the llama.cpp site, the `nomic-ai/nomic-embed-text-v1.5` and
+`-GGUF` model cards, the llama.cpp server reference, a write-up on Matryoshka embeddings
+for faster vector search, the llm-d architecture proposal, the agentgateway inference
+routing docs, and a Ukrainian-language case study on embedding selection for a legal-domain
+RAG system (the source of the benchmark rule in ADR-0001).
+
+| Stage | Tokens (approx.) |
+|---|---|
+| Repository familiarisation | 54,600 |
+| Reviewing source material — 6 page fetches, 4 searches | 32,900 |
+| Writing the ADRs, ToDos, and this changelog | 27,500 |
+| Verification — YAML validation via `yq`, cluster and git state | 5,600 |
+| **Total** | **~120,600** |
+
+Quota consumed on a Claude Pro plan: **16% of the 5-hour session budget, 11% of the 7-day
+budget.** Models used: Claude Sonnet 5 for repository familiarisation, Claude Opus 5 for
+the research and drafting.
+
+The token figures are reconstructed from context-budget markers rather than billing, and
+the counter reset when the model was switched mid-task, so treat them as an estimate. The
+quota percentages are read directly from the client's usage panel and are the more reliable
+of the two.
