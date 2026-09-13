@@ -66,6 +66,15 @@ spec:
     env:
       NEO4J_PLUGINS: '["apoc"]'
 
+    # Loading the jar is not enough -- apoc.meta.schema reads internal store
+    # APIs, so without these it registers as unavailable:
+    #
+    #   Neo.ClientError.Procedure.ProcedureRegistrationFailed
+    #   (apoc.meta.schema is unavailable)
+    config:
+      dbms.security.procedures.unrestricted: "apoc.*"
+      dbms.security.procedures.allowlist: "apoc.*"
+
     services:
       neo4j:
         # The chart defaults this to a LoadBalancer for Neo4j Browser. KinD has
