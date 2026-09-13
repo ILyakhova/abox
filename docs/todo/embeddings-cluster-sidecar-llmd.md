@@ -67,7 +67,11 @@ docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/ggml-org/llama.cpp:se
 # ghcr.io/ggml-org/llama.cpp@sha256:<digest>
 ```
 
-- [ ] Digest recorded and substituted into the manifest below.
+The manifest below already carries the digest resolved on 2026-09-13
+(`sha256:cbcdcb52…33ff4`, the multi-arch manifest-list digest, so it is architecture
+independent). Re-resolve only when deliberately moving the image forward.
+
+- [ ] Digest in the manifest matches what `docker pull` reports, or was updated on purpose.
 
 ### A2. Create `releases/embeddings.yaml`
 
@@ -135,7 +139,8 @@ spec:
           mountPath: /models
       containers:
       - name: llama-server
-        image: ghcr.io/ggml-org/llama.cpp@sha256:REPLACE_WITH_DIGEST
+        # Resolved 2026-09-13 by the command in A1; re-resolve to move the image forward.
+        image: ghcr.io/ggml-org/llama.cpp@sha256:cbcdcb52d484e08e23bfc0135afa5beadd2d540513bbb7c65b233231fa033ff4
         args:
         - -m
         - /models/nomic-embed-text-v1.5.Q8_0.gguf
@@ -150,8 +155,11 @@ spec:
         - "8192"
         - --rope-scaling
         - yarn
+        # 0.25, not the 0.75 the model card prints: llama.cpp caps a slot at
+        # n_ctx_train / rope_freq_scale, and this GGUF reports n_ctx_train = 2048,
+        # so 0.75 silently caps the context at 2730 instead of 8192.
         - --rope-freq-scale
-        - "0.75"
+        - "0.25"
         - --host
         - 0.0.0.0
         - --port
@@ -326,7 +334,8 @@ spec:
 
       # Native sidecar: restartPolicy Always inside initContainers.
       - name: embedder
-        image: ghcr.io/ggml-org/llama.cpp@sha256:REPLACE_WITH_DIGEST
+        # Resolved 2026-09-13 by the command in A1; re-resolve to move the image forward.
+        image: ghcr.io/ggml-org/llama.cpp@sha256:cbcdcb52d484e08e23bfc0135afa5beadd2d540513bbb7c65b233231fa033ff4
         restartPolicy: Always
         args:
         - -m
@@ -342,8 +351,11 @@ spec:
         - "8192"
         - --rope-scaling
         - yarn
+        # 0.25, not the 0.75 the model card prints: llama.cpp caps a slot at
+        # n_ctx_train / rope_freq_scale, and this GGUF reports n_ctx_train = 2048,
+        # so 0.75 silently caps the context at 2730 instead of 8192.
         - --rope-freq-scale
-        - "0.75"
+        - "0.25"
         - --host
         - 127.0.0.1
         - --port

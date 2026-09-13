@@ -36,7 +36,7 @@ docker run -d --name abox-embeddings \
     --embeddings \
     --pooling mean \
     -c 8192 -b 8192 -ub 8192 \
-    --rope-scaling yarn --rope-freq-scale 0.75 \
+    --rope-scaling yarn --rope-freq-scale 0.25 \
     --host 0.0.0.0 --port 8080
 ```
 
@@ -48,8 +48,26 @@ Flag-by-flag, because each one is load-bearing:
 | `--embeddings` | Puts the server in embedding-only mode. Without it `/v1/embeddings` is not served. |
 | `--pooling mean` | `nomic-embed-text-v1.5` is a BERT-style encoder trained with mean pooling. `last` is for decoder-based embedders (e.g. `nomic-embed-code`) and produces silently wrong vectors here. |
 | `-c 8192` | Full context. `-b`/`-ub` are raised to match so a single 8k input is not split across batches. |
-| `--rope-scaling yarn --rope-freq-scale 0.75` | The 8k context relies on YaRN scaling. Omitting it degrades long-context quality with no warning. |
+| `--rope-scaling yarn --rope-freq-scale 0.25` | Unlocks the 8192 context. **Not the value on the model card** — see the note below. |
 | `--host 0.0.0.0` | Required to reach the server from outside the container. |
+
+> **Why `0.25` and not the `0.75` the model card prints.** The GGUF advertises
+> `n_ctx_train = 2048`, and llama.cpp caps a slot's usable context at
+> `n_ctx_train / rope_freq_scale`. With the card's `0.75` that is `2048 / 0.75 = 2730`, and
+> the server silently caps you there — you ask for 8192, you get 2730:
+>
+> ```
+> srv load_model: the slot context (8192) exceeds the training context of the model (2730) - capping
+> ```
+>
+> `0.25` gives `2048 / 0.25 = 8192`, which is the number the model card advertises
+> everywhere else. Verified on this image: inputs of 3520 and 5934 tokens embed cleanly at
+> `0.25` and would have been truncated at `0.75`, and the semantic margin in §5 does not
+> degrade (0.3829 at `0.25` against 0.3596 at `0.75`).
+>
+> `--parallel` is deliberately **not** set. The server defaults to 4 slots with
+> `kv_unified = true`, and each slot gets the full 8192 — the context is not divided.
+> Forcing `--parallel 1` only costs concurrency.
 
 - [ ] Container is running: `docker ps --filter name=abox-embeddings`
 - [ ] Weights downloaded and model loaded (first start takes a minute or two):
@@ -67,7 +85,7 @@ brew install llama.cpp          # macOS
 llama-server -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0 \
   --embeddings --pooling mean \
   -c 8192 -b 8192 -ub 8192 \
-  --rope-scaling yarn --rope-freq-scale 0.75 \
+  --rope-scaling yarn --rope-freq-scale 0.25 \
   --host 127.0.0.1 --port 8088
 ```
 
@@ -184,8 +202,19 @@ assert cos(q, rel) > cos(q, unrel) + 0.15, "pooling or prefixes are wrong"
 print("OK")
 ```
 
-Expected shape of the result: related ≈ 0.7–0.85, unrelated ≈ 0.3–0.5. If the two scores
-are close together, or both near 0.99, re-check `--pooling mean` first.
+Measured on the exact command in §2 (`Q8_0`, `--pooling mean`, `--rope-freq-scale 0.25`):
+
+```
+related   (Paris/France):   0.8209
+unrelated (mitochondrion):  0.4379
+margin:                     0.3829
+```
+
+If the two scores sit close together, or both land near 0.99, re-check `--pooling mean`
+first — `last` pooling on this encoder returns well-formed vectors that do not separate.
+
+The server already returns unit-length vectors (`--embd-normalize` defaults to Euclidean),
+so a measured norm of `1.000000` is expected and the cosine denominator is a formality.
 
 ---
 
@@ -201,6 +230,10 @@ def truncate(v, dim=256):
     v = np.asarray(v[:dim], dtype=np.float32)
     return v / np.linalg.norm(v)
 ```
+
+On the §5 pair, truncating to 256 dims held the ranking and did not narrow the gap —
+related 0.8330, unrelated 0.4293, margin 0.4036 against 0.3829 at full width. That is one
+sentence pair, not evidence about your corpus; it only shows the mechanism works.
 
 For two-stage adaptive retrieval, store both widths as named vectors in one Qdrant
 collection — shortlist on the indexed 256-dim vector, rescore candidates on the stored

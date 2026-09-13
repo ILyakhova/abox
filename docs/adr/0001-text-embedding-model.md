@@ -96,10 +96,14 @@ does this.
 than chat generation is. Q4_K_M saves 59 MiB against Q8_0 — a rounding error in this
 cluster — in exchange for an unvalidated recall regression. Not worth it.
 
-**YaRN scaling must be passed explicitly.** The 8192 context is reached via YaRN RoPE
-scaling; the model card's own llama.cpp invocation passes
-`--rope-scaling yarn --rope-freq-scale 0.75`. Omitting it degrades quality at long context
-without any warning.
+**The 8192 context is not what you get by default, and the model card's own flags do not
+deliver it.** The GGUF reports `n_ctx_train = 2048`; the 8192 figure is reached by RoPE
+scaling, and llama.cpp caps a slot at `n_ctx_train / rope_freq_scale`. The model card's
+llama.cpp invocation passes `--rope-freq-scale 0.75`, which yields `2048 / 0.75 = 2730` and
+a silent cap well short of the advertised context. `0.25` yields the full 8192. Verified
+against the runtime — see the [local runbook](../todo/embeddings-local-llama-cpp.md#2-option-a--docker-recommended).
+Anyone copying the model card verbatim will index truncated documents and never see an
+error.
 
 **The model is English-first.** This is the largest limitation and the reason for the rule
 below.

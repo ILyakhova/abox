@@ -81,9 +81,34 @@ Releases are the `v*` tags that CI publishes as OCI artifacts to
   a 2-CPU limit would let it starve the control plane. The startup probe budget is widened
   to 10 minutes to match, because a CPU-capped embedder loads slowly on a busy node.
 
+### Verified
+
+The local runbook was executed end to end against `ghcr.io/ggml-org/llama.cpp:server`
+(digest `sha256:cbcdcb52…33ff4`) with the `Q8_0` GGUF. The server reached `/health` in
+about six seconds on CPU, `/v1/embeddings` returned 768-dimension unit-length vectors,
+batching returned one vector per input, and the semantic acceptance test separated a
+related document from an unrelated one by a margin of 0.3829 (0.8209 against 0.4379).
+Truncating to 256 dimensions held the ranking at a margin of 0.4036, so the Matryoshka
+path works as ADR-0001 assumes.
+
+Running it caught a defect in the documented flags, which is the reason the runbook exists.
+**The model card's `--rope-freq-scale 0.75` does not give you the advertised 8192-token
+context — it gives you 2730.** The GGUF reports `n_ctx_train = 2048` and llama.cpp caps a
+slot at `n_ctx_train / rope_freq_scale`, then logs `the slot context (8192) exceeds the
+training context of the model (2730) - capping` and carries on. Anyone copying the model
+card verbatim indexes truncated documents and never sees an error. `0.25` yields the full
+8192; inputs of 3520 and 5934 tokens were confirmed to embed cleanly, and the semantic
+margin did not degrade (0.3829 at `0.25` against 0.3596 at `0.75`). ADR-0001 and both
+runbooks were corrected.
+
+A second hypothesis was tested and rejected rather than documented: the context is *not*
+divided across parallel slots. The server defaults to four slots with `kv_unified = true`
+and each one gets the full 8192, so `--parallel 1` would cost concurrency for no gain and
+is deliberately absent from the commands.
+
 ### Notes
 
-These are design documents only. No manifest under `releases/` changed and nothing new is
+The cluster side remains design-only. No manifest under `releases/` changed and nothing is
 deployed — `releases/embeddings.yaml` is specified in the ToDo but deliberately not added
 to `releases/kustomization.yaml`, since CODEBASE.md forbids publishing a release that has
 not been verified green with `flux get all`.
