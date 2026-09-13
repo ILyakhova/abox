@@ -78,6 +78,28 @@ make push   # bumps patch version, tags, pushes → CI publishes OCI artifact �
 
 The CRD kustomization runs first (`wait: true`), apps run after (`dependsOn: releases-crds`). This ordering is enforced by Flux and must be preserved.
 
+## Troubleshooting
+
+### Image pulls time out
+
+On Codespaces — and any host carrying both iptables backends — the `kind` network can lose
+egress. The symptom is a blackhole rather than a refusal: pulls fail with
+`dial tcp: lookup ghcr.io ... i/o timeout`, and pods sit in `ImagePullBackOff`.
+
+`make run` repairs this before provisioning, but the repair is an iptables policy that
+Docker resets. It does **not** survive a Codespace stop/resume, and `make apply` does not
+re-apply it. Re-run it whenever pulls start timing out:
+
+```bash
+make fix-egress
+```
+
+It prints per-node `egress OK` when the cluster can reach a registry again. Then restart
+whatever failed, e.g. `kubectl -n <ns> rollout restart deploy/<name>`.
+
+This affects every registry at once, so it is not a Docker Hub rate limit and switching
+images will not help.
+
 ## Contributing
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md). Notable changes are recorded in

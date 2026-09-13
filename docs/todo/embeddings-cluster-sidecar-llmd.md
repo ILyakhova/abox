@@ -100,6 +100,14 @@ file exists, a second copy here would only drift from it.
 CODEBASE.md forbids pushing without a green reconcile — a broken release goes to GHCR and
 is picked up automatically.
 
+This step pulls two images the cluster has never seen, so confirm the nodes still have
+egress first. The repair `make run` applied does not survive a Codespace stop/resume, and
+this is the cheapest moment to find that out:
+
+```bash
+make fix-egress      # no-op if the policy is already permissive
+```
+
 Apply **only the new file**. `kubectl apply -k releases/` would also re-apply the
 HelmReleases that Flux owns, which makes the two writers fight over the same objects.
 

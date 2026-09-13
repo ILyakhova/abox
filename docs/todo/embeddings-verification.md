@@ -48,6 +48,9 @@ problem. Fix it with `make fix-egress`, then
 `kubectl -n embeddings rollout restart deploy/embeddings`. This blackholes *every* registry,
 so it is not a Docker Hub problem and switching images will not help.
 
+Expect to hit this more than once: the repair is an iptables policy Docker resets, so it
+comes back after a Codespace stop/resume even on a cluster that was working yesterday.
+
 ## 2. Context is not silently capped
 
 The check that catches the highest-cost silent failure: a capped context truncates
