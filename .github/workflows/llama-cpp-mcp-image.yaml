@@ -1,0 +1,60 @@
+# Builds chadsten/llama-cpp-mcp from source and pushes it to GHCR. Separate
+# from flux-push.yaml for the same reason as nomic-embed: the image moves only
+# when the Dockerfile or the pinned REF does.
+name: Build llama-cpp-mcp image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'images/llama-cpp-mcp/**'
+      - '.github/workflows/llama-cpp-mcp-image.yaml'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}/llama-cpp-mcp
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: images/llama-cpp-mcp
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:v0.1.1
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "### llama-cpp-mcp image pushed" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.IMAGE }}:v0.1.1" >> $GITHUB_STEP_SUMMARY
+          echo "digest: ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
