@@ -5,5 +5,7 @@ resources:
   - agentgateway.yaml
   - agentregistry.yaml
   - kagent.yaml
+  - llama-cpp-embeddings.yaml
+  - llmd.yaml
   - phoenix.yaml
   - qdrant.yaml

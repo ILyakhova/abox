@@ -34,6 +34,21 @@ spec:
     namespace: flux-system
   install:
     createNamespace: true
+  values:
+    # Required by releases/llmd.yaml -- without it an HTTPRoute backendRef to an
+    # InferencePool silently never resolves. The flag gates two things in the
+    # chart: KGW_ENABLE_INFER_EXT on the controller, and the ClusterRole letting
+    # it watch inferencepools / inferencepools/status / inferenceobjectives /
+    # endpointslices. It defaults to false; the reference cluster sets exactly this and nothing
+    # else on its own agentgateway release.
+    #
+    # Note this is the data plane too, not just a control-plane toggle: the same
+    # deployment template hardcodes KGW_ENABLE_AGENTGATEWAY=true and
+    # KGW_ENABLE_ENVOY=false, so inference traffic is proxied by agentgateway
+    # (Rust) and no Envoy is deployed. The Envoy-backed path is the separate
+    # "kgateway" GatewayClass, which abox does not install.
+    inferenceExtension:
+      enabled: true
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway

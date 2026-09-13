@@ -1,0 +1,72 @@
+# Builds the baked nomic-embed-text-v1.5 llama.cpp image and pushes it to GHCR.
+#
+# Deliberately NOT tied to the v* tags that flux-push.yaml uses: that workflow
+# publishes ./releases as an OCI artifact on every release, and this image
+# changes only when the Dockerfile or the pinned model/llama.cpp version does.
+# Rebuilding a 274MB image on every release tag would be waste.
+name: Build nomic-embed image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'images/nomic-embed/**'
+      - '.github/workflows/nomic-embed-image.yaml'
+  # So the image can be built from a feature branch before it is merged --
+  # which is how it gets published the first time.
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}/nomic-embed
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # arm64 is emulated. Only the llama.cpp runtime stage goes through qemu --
+      # the Dockerfile pins the model download to $BUILDPLATFORM precisely so the
+      # big curl stays off the emulator.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: images/nomic-embed
+          # Codespaces and CI are amd64; a dev Mac is arm64.
+          platforms: linux/amd64,linux/arm64
+          push: true
+          # The tag encodes what is actually inside: the model revision and the
+          # llama.cpp server build. Bump it when either moves -- do not mutate a
+          # published tag, since the Deployment pins this by tag.
+          tags: |
+            ${{ env.IMAGE }}:v1.5-f16-b10920
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          echo "### nomic-embed image pushed" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.IMAGE }}:v1.5-f16-b10920" >> $GITHUB_STEP_SUMMARY
+          echo "digest: ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
