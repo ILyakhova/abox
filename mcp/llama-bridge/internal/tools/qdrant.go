@@ -77,10 +77,21 @@ func qdrant(ctx context.Context, method, path string, body any, out any) (int, e
 //	batch size (current batch size: 2048)
 //
 // Raising the batch does not help: the GGUF's n_ctx_train is 2048 and the
-// slot is clamped to it regardless. The reference embedder caps on the client
-// instead -- charts/triageagent/values.yaml, --embedding-max-input-chars,
-// "keep below the sidecar model's token window x ~4", default 8000.
-const defaultMaxInputChars = 8000
+// slot is clamped to it regardless.
+//
+// The reference embedder caps the input instead -- charts/triageagent/
+// values.yaml, --embedding-max-input-chars, "keep below the sidecar model's
+// token window x ~4", default 8000. Most of an Agent manifest is prose, which
+// does hit that ratio, but 8000 chars measured 2061 tokens against this
+// server: 13 over. 7000 is ~1750 tokens of prose and still fits at 3.4
+// chars/token.
+//
+// Capping loses the tail, so qdrant_store splits instead and keeps every
+// piece. This is the per-embed ceiling, and the chunk size.
+const defaultMaxInputChars = 7000
+
+// Enough to carry a heading or an opening key into the next piece.
+const chunkOverlapChars = 200
 
 func maxInputChars() int {
 	if v := os.Getenv("EMBEDDING_MAX_INPUT_CHARS"); v != "" {
@@ -89,6 +100,44 @@ func maxInputChars() int {
 		}
 	}
 	return defaultMaxInputChars
+}
+
+// Splits on a line boundary when there is one in the last fifth of the
+// window, so a chunk rarely ends mid-key.
+func chunk(s string) []string {
+	r := []rune(s)
+	size := maxInputChars()
+	if len(r) <= size {
+		return []string{s}
+	}
+
+	overlap := chunkOverlapChars
+	if overlap >= size {
+		overlap = 0
+	}
+
+	var out []string
+	for start := 0; start < len(r); {
+		end := start + size
+		if end >= len(r) {
+			out = append(out, string(r[start:]))
+			break
+		}
+		cut := end
+		for i := end - 1; i > end-size/5 && i > start; i-- {
+			if r[i] == '\n' {
+				cut = i + 1
+				break
+			}
+		}
+		out = append(out, string(r[start:cut]))
+		next := cut - overlap
+		if next <= start {
+			next = cut
+		}
+		start = next
+	}
+	return out
 }
 
 // nomic is trained with an instruction prefix and the two are not
@@ -153,30 +202,52 @@ type StoreParams struct {
 func QdrantStore() MCPTool[StoreParams, Raw] {
 	return MCPTool[StoreParams, Raw]{
 		Name:        "qdrant_store",
-		Description: "Embed text with the cluster's llama.cpp server and store it in Qdrant.",
+		Description: "Embed text with the cluster's llama.cpp server and store it in Qdrant. Long text is split into several points; nothing is dropped.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, p *mcp.CallToolParamsFor[StoreParams]) (*mcp.CallToolResultFor[Raw], error) {
-			vec, err := embed(ctx, p.Arguments.Information, "search_document: ")
+			parts := chunk(p.Arguments.Information)
+
+			doc, err := uuid()
 			if err != nil {
 				return nil, err
 			}
-			if err := ensureCollection(ctx, len(vec)); err != nil {
-				return nil, err
+
+			points := make([]map[string]any, 0, len(parts))
+			dims := 0
+			for i, part := range parts {
+				vec, err := embed(ctx, part, "search_document: ")
+				if err != nil {
+					return nil, fmt.Errorf("chunk %d/%d: %w", i+1, len(parts), err)
+				}
+				if dims == 0 {
+					dims = len(vec)
+					if err := ensureCollection(ctx, dims); err != nil {
+						return nil, err
+					}
+				}
+
+				id, err := uuid()
+				if err != nil {
+					return nil, err
+				}
+				// doc ties the pieces back together; a hit on one chunk can pull
+				// its siblings with a filter on this field.
+				payload := map[string]any{
+					"document": part,
+					"doc":      doc,
+					"chunk":    i,
+					"chunks":   len(parts),
+				}
+				for k, v := range p.Arguments.Metadata {
+					payload[k] = v
+				}
+				points = append(points, map[string]any{"id": id, "vector": vec, "payload": payload})
 			}
 
-			id, err := uuid()
-			if err != nil {
-				return nil, err
-			}
-			payload := map[string]any{"document": p.Arguments.Information}
-			for k, v := range p.Arguments.Metadata {
-				payload[k] = v
-			}
-
-			body := map[string]any{"points": []map[string]any{{"id": id, "vector": vec, "payload": payload}}}
+			body := map[string]any{"points": points}
 			if _, err := qdrant(ctx, http.MethodPut, "/collections/"+collection()+"/points?wait=true", body, nil); err != nil {
 				return nil, err
 			}
-			return text(fmt.Sprintf("Stored in %s as %s (%d dims).", collection(), id, len(vec))), nil
+			return text(fmt.Sprintf("Stored in %s as doc %s: %d chunk(s), %d dims.", collection(), doc, len(parts), dims)), nil
 		},
 	}
 }

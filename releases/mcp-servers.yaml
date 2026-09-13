@@ -38,7 +38,7 @@ spec:
   stdioTransport: {}
   deployment:
     # Scaffolded with `kmcp init go`; source in mcp/llama-bridge.
-    image: ghcr.io/den-vasyliev/abox/llama-bridge:0.2.1
+    image: ghcr.io/den-vasyliev/abox/llama-bridge:0.2.2
     cmd: /app/server
     env:
       # The standalone llama.cpp Deployment, started with --embeddings. So
