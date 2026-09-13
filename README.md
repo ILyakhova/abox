@@ -11,6 +11,7 @@
 | **agentgateway v2.2.1** | AI-aware API gateway (Gateway API–native, MCP-aware) |
 | **kagent 0.10.1** | Kubernetes-native AI agent framework |
 | **Qdrant 1.19.1** | Vector database for retrieval |
+| **Neo4j 2026.7.1** | Graph database (`bolt://neo4j.neo4j:7687`) |
 | **llm-d v0.3.17** | Distributed inference serving — llama.cpp + InferencePool/EPP, serving `nomic-embed-text-v1.5` |
 | **llama.cpp** | Second, lightweight embeddings backend — same model as f16 GGUF |
 | **Arize Phoenix 12.0.10** | LLM observability — tracing, evals, prompt playground |

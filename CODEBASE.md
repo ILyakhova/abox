@@ -21,6 +21,7 @@ abox is a **local AI infrastructure sandbox**. A single `make run` provisions a 
 | Agent runtime | kagent | 0.10.1 |
 | Gateway API | gateway-api (experimental channel) | v1.6.2 |
 | Vector database | qdrant | 1.19.1 |
+| Graph database | neo4j (community) | 2026.7.1 |
 | LLM observability | Arize Phoenix | 12.0.10 |
 | OCI artifact store | GHCR | — |
 | CI | GitHub Actions | — |

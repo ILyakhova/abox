@@ -7,5 +7,6 @@ resources:
   - kagent.yaml
   - llama-cpp-embeddings.yaml
   - llmd.yaml
+  - neo4j.yaml
   - phoenix.yaml
   - qdrant.yaml
