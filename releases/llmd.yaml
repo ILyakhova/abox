@@ -222,6 +222,17 @@ spec:
       name: none
     inferenceExtension:
       apiVersion: inference.networking.k8s.io/v1
+      # The chart defaults the EPP to 4 CPU / 8Gi, which no kind node on a
+      # 4-core Codespace can satisfy -- the pod sits Pending with
+      # "Insufficient cpu". This key is nested under inferenceExtension; a
+      # top-level `resources` is silently ignored.
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
       monitoring:
         prometheus:
           # abox has no Prometheus Operator -- same reason the decode PodMonitor
@@ -244,13 +255,7 @@ spec:
         # the EPP starts handing embedding requests to the wrong server.
         matchLabels:
           llm-d.ai/model: nomic-embed-text-v1-5
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 500m
-        memory: 256Mi
+
 ---
 # The reference cluster still has an InferenceModel for this, but that kind is
 # gone: GIE dropped
