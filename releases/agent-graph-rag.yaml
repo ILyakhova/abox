@@ -12,7 +12,7 @@ spec:
     systemMessage: |
       You are a data agent over two stores in this cluster:
 
-      - Qdrant, a vector store, via qdrant-store / qdrant-find. Free text in,
+      - Qdrant, a vector store, via qdrant_store / qdrant_find. Free text in,
         semantic search out. Collection: abox.
       - Neo4j, a graph, via get-schema / read-cypher / write-cypher. Entities
         and the relationships between them.
@@ -23,12 +23,12 @@ spec:
          invent new ones only when nothing fits.
       2. Write the entities and relationships to Neo4j with write-cypher. Use
          MERGE, not CREATE, so re-ingesting the same input is idempotent.
-      3. Write the prose to Qdrant with qdrant-store. Put the Neo4j keys you
+      3. Write the prose to Qdrant with qdrant_store. Put the Neo4j keys you
          just merged in the metadata so a hit can be joined back to the graph.
 
       ## Retrieve
 
-      1. qdrant-find for anything phrased as a topic or question.
+      1. qdrant_find for anything phrased as a topic or question.
       2. Pull the identifiers out of the metadata of what came back, then
          read-cypher to expand the neighbourhood around them.
       3. Answer from both. Say which store each fact came from.
@@ -40,10 +40,10 @@ spec:
         mcpServer:
           apiGroup: kagent.dev
           kind: MCPServer
-          name: qdrant-mcp
+          name: llama-bridge
           toolNames:
-            - qdrant-store
-            - qdrant-find
+            - qdrant_store
+            - qdrant_find
       - type: McpServer
         mcpServer:
           apiGroup: kagent.dev

@@ -4,54 +4,6 @@
 apiVersion: kagent.dev/v1alpha1
 kind: MCPServer
 metadata:
-  name: qdrant-mcp
-  namespace: kagent
-spec:
-  # http, not stdio: FastMCP's stdio loop exits on stdin EOF, so every session
-  # teardown killed the container. Restarting meant a fresh uvx install and a
-  # re-fetch of the ONNX weights, ~14s during which calls got
-  # "connect: connection refused".
-  transportType: http
-  httpTransport:
-    targetPort: 8000
-    # Trailing slash: FastMCP mounts the app at /mcp/ and 307s /mcp to it.
-    path: /mcp/
-  deployment:
-    # Upstream publishes no image, only a PyPI package -- run it with uvx.
-    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
-    cmd: uvx
-    args:
-      - mcp-server-qdrant
-      - --transport
-      - streamable-http
-    port: 8000
-    env:
-      FASTMCP_SERVER_HOST: 0.0.0.0
-      FASTMCP_SERVER_PORT: "8000"
-      # fastembed keeps the model out of the HF cache dir default under /root.
-      HF_HOME: /tmp/hf
-      FASTEMBED_CACHE_PATH: /tmp/fastembed
-      QDRANT_URL: http://qdrant.qdrant:6333
-      # New collection: the vector is named after the model
-      # (fast-nomic-embed-text-v1-5), so the old MiniLM one cannot be reused.
-      COLLECTION_NAME: abox-nomic
-      # Same model llm-d and llama.cpp serve, but embedded in-process by
-      # fastembed, not over /v1/embeddings. 768 dims. Downloaded from
-      # HuggingFace on first start.
-      EMBEDDING_MODEL: nomic-ai/nomic-embed-text-v1.5
-    resources:
-      requests:
-        cpu: 100m
-        memory: 1Gi
-      limits:
-        cpu: "2"
-        # OOMKilled (137) at 2Gi: onnxruntime holds the f32 nomic weights plus
-        # its arena, on top of the interpreter and the uvx install.
-        memory: 4Gi
----
-apiVersion: kagent.dev/v1alpha1
-kind: MCPServer
-metadata:
   name: neo4j-mcp
   namespace: kagent
 spec:
@@ -86,20 +38,26 @@ spec:
   stdioTransport: {}
   deployment:
     # Scaffolded with `kmcp init go`; source in mcp/llama-bridge.
-    image: ghcr.io/den-vasyliev/abox/llama-bridge:0.1.0
+    image: ghcr.io/den-vasyliev/abox/llama-bridge:0.2.0
     cmd: /app/server
     env:
       # The standalone llama.cpp Deployment, started with --embeddings. So
       # llama_embed, llama_health, llama_props, llama_models and llama_tokenize
       # work; llama_chat gets a 501 until a generative server is pointed at.
       LLAMA_BASE_URL: http://llama-cpp-embeddings.llama-cpp:8090
+      # qdrant_store / qdrant_find embed through LLAMA_BASE_URL, so the agent's
+      # memory lands in the same vector space the gateway serves. Replaces
+      # mcp-server-qdrant, which could only embed in-process with fastembed and
+      # was OOMKilled doing it.
+      QDRANT_URL: http://qdrant.qdrant:6333
+      QDRANT_COLLECTION: abox-llamacpp
     resources:
       requests:
         cpu: 25m
         memory: 32Mi
       limits:
-        cpu: 200m
-        memory: 128Mi
+        cpu: 500m
+        memory: 256Mi
 ---
 # Points at the Service kmcp creates for the MCPServer above. Lets an Agent in
 # another namespace, or one that needs per-agent headers, reach the same server.
