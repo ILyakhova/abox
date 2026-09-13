@@ -1,0 +1,54 @@
+# llama-bridge
+
+Bridge MCP tools to a llama.cpp server
+
+## 🚀 Getting Started
+
+This project was generated with [`kmcp`](https://github.com/kagent-dev/kmcp).
+
+### Prerequisites
+
+- [Go](https://golang.org/doc/install) (1.23 or later)
+- [Docker](https://docs.docker.com/get-docker/)
+
+### Local Development
+
+1.  **Tidy dependencies:**
+    ```bash
+    go mod tidy
+    ```
+
+2.  **Run the server:**
+    ```bash
+    go run cmd/server/main.go
+    ```
+
+### Building the Docker Image
+
+To build a Docker image for this project, run:
+
+```bash
+kmcp build
+```
+
+This will create an image named `llama-bridge:latest`.
+
+### Deploying to Kubernetes
+
+To deploy the MCP server to Kubernetes, first ensure you have a running cluster and `kubectl` is configured. Then, run:
+
+```bash
+kmcp deploy mcp
+```
+
+This will create an `MCPServer` custom resource in the `default` namespace.
+
+## 🛠️ Adding a New Tool
+
+To add a new tool to your project, use the `kmcp add-tool` command:
+
+```bash
+kmcp add-tool <tool-name>
+```
+
+This will generate a new Go file in the `internal/tools/` directory with a template for your new tool. You will need to add the new tool to the `main.go` file.

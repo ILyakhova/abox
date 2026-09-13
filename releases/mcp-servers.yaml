@@ -60,27 +60,24 @@ spec:
 apiVersion: kagent.dev/v1alpha1
 kind: MCPServer
 metadata:
-  name: llama-cpp-mcp
+  name: llama-bridge
   namespace: kagent
 spec:
   transportType: stdio
   stdioTransport: {}
   deployment:
-    # Built from source by .github/workflows/llama-cpp-mcp-image.yaml -- not on npm.
-    image: ghcr.io/den-vasyliev/abox/llama-cpp-mcp:v0.1.1
-    cmd: node
-    args:
-      - /app/dist/index.js
+    # Scaffolded with `kmcp init go`; source in mcp/llama-bridge.
+    image: ghcr.io/den-vasyliev/abox/llama-bridge:0.1.0
+    cmd: /app/server
     env:
       # The standalone llama.cpp Deployment, started with --embeddings. So
-      # llama_embed, llama_health, llama_props, llama_slots, llama_metrics and
-      # llama_tokenize work; llama_complete / llama_chat / llama_infill return
-      # 501 from a pooling-only server.
-      LLAMA_SERVER_URL: http://llama-cpp-embeddings.llama-cpp:8090
+      # llama_embed, llama_health, llama_props, llama_models and llama_tokenize
+      # work; llama_chat gets a 501 until a generative server is pointed at.
+      LLAMA_BASE_URL: http://llama-cpp-embeddings.llama-cpp:8090
     resources:
       requests:
-        cpu: 50m
-        memory: 64Mi
+        cpu: 25m
+        memory: 32Mi
       limits:
-        cpu: 500m
-        memory: 256Mi
+        cpu: 200m
+        memory: 128Mi

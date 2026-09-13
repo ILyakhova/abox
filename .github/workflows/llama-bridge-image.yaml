@@ -1,18 +1,18 @@
-# Builds chadsten/llama-cpp-mcp from source and pushes it to GHCR. Separate
-# from flux-push.yaml for the same reason as nomic-embed: the image moves only
-# when the Dockerfile or the pinned REF does.
-name: Build llama-cpp-mcp image
+# Builds mcp/llama-bridge and pushes it to GHCR. Separate from flux-push.yaml:
+# that publishes ./releases on every v* tag, this moves only when the server
+# source does.
+name: Build llama-bridge image
 
 on:
   push:
     branches: [main]
     paths:
-      - 'images/llama-cpp-mcp/**'
-      - '.github/workflows/llama-cpp-mcp-image.yaml'
+      - 'mcp/llama-bridge/**'
+      - '.github/workflows/llama-bridge-image.yaml'
   workflow_dispatch:
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}/llama-cpp-mcp
+  IMAGE: ghcr.io/${{ github.repository }}/llama-bridge
 
 jobs:
   build:
@@ -22,6 +22,9 @@ jobs:
       packages: write
 
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -35,26 +38,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Build and push
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: images/llama-cpp-mcp
+          context: mcp/llama-bridge
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.IMAGE }}:v0.1.1
+            ${{ env.IMAGE }}:0.1.0
             ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Summary
         run: |
-          echo "### llama-cpp-mcp image pushed" >> $GITHUB_STEP_SUMMARY
+          echo "### llama-bridge image pushed" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "${{ env.IMAGE }}:v0.1.1" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.IMAGE }}:0.1.0" >> $GITHUB_STEP_SUMMARY
           echo "digest: ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
