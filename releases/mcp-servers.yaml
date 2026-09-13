@@ -14,7 +14,8 @@ spec:
   transportType: http
   httpTransport:
     targetPort: 8000
-    path: /mcp
+    # Trailing slash: FastMCP mounts the app at /mcp/ and 307s /mcp to it.
+    path: /mcp/
   deployment:
     # Upstream publishes no image, only a PyPI package -- run it with uvx.
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
@@ -27,6 +28,9 @@ spec:
     env:
       FASTMCP_SERVER_HOST: 0.0.0.0
       FASTMCP_SERVER_PORT: "8000"
+      # fastembed keeps the model out of the HF cache dir default under /root.
+      HF_HOME: /tmp/hf
+      FASTEMBED_CACHE_PATH: /tmp/fastembed
       QDRANT_URL: http://qdrant.qdrant:6333
       # New collection: the vector is named after the model
       # (fast-nomic-embed-text-v1-5), so the old MiniLM one cannot be reused.
@@ -38,10 +42,12 @@ spec:
     resources:
       requests:
         cpu: 100m
-        memory: 512Mi
+        memory: 1Gi
       limits:
-        cpu: "1"
-        memory: 2Gi
+        cpu: "2"
+        # OOMKilled (137) at 2Gi: onnxruntime holds the f32 nomic weights plus
+        # its arena, on top of the interpreter and the uvx install.
+        memory: 4Gi
 ---
 apiVersion: kagent.dev/v1alpha1
 kind: MCPServer
