@@ -26,5 +26,8 @@ RUN for f in config.json model.safetensors tokenizer.json tokenizer_config.json 
 # transformers fetch modelling code at runtime. vLLM 0.29 registers
 # NomicBertModel natively, so llmd.yaml omits --trust-remote-code and the
 # auto_map is never read. The modelling .py files are therefore not baked in.
+# Built for linux/amd64 and linux/arm64. The weights are identical; the two
+# manifest entries exist only because containerd matches on the architecture
+# an image config declares, and abox runs on both.
 FROM scratch
 COPY --from=fetch /out/ /

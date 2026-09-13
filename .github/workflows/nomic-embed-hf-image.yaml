@@ -35,11 +35,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # No qemu: the final stage is FROM scratch and the fetch stage is pinned
-      # to BUILDPLATFORM, so the weights are arch-independent.
+      # Multi-arch, and no qemu needed: the fetch stage is pinned to
+      # BUILDPLATFORM and the final stage is FROM scratch, so nothing executes
+      # under emulation. Both entries share the same weights layer. Required
+      # because an image config always declares an architecture and containerd
+      # enforces it, so an amd64-only push cannot be pulled on arm64.
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: images/nomic-embed-hf
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ env.IMAGE }}:v1.5
