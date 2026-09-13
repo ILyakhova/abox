@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -69,9 +70,33 @@ func qdrant(ctx context.Context, method, path string, body any, out any) (int, e
 	return resp.StatusCode, nil
 }
 
+// A pooled embedding must fit in one micro-batch, so llama.cpp rejects
+// anything over --ubatch-size outright:
+//
+//	input (5202 tokens) is too large to process. increase the physical
+//	batch size (current batch size: 2048)
+//
+// Raising the batch does not help: the GGUF's n_ctx_train is 2048 and the
+// slot is clamped to it regardless. The reference embedder caps on the client
+// instead -- charts/triageagent/values.yaml, --embedding-max-input-chars,
+// "keep below the sidecar model's token window x ~4", default 8000.
+const defaultMaxInputChars = 8000
+
+func maxInputChars() int {
+	if v := os.Getenv("EMBEDDING_MAX_INPUT_CHARS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultMaxInputChars
+}
+
 // nomic is trained with an instruction prefix and the two are not
 // interchangeable: a document embedded as a query lands in the wrong place.
 func embed(ctx context.Context, text, prefix string) ([]float64, error) {
+	if r := []rune(text); len(r) > maxInputChars() {
+		text = string(r[:maxInputChars()])
+	}
 	out, err := post(ctx, "/v1/embeddings", map[string]any{"input": prefix + text})
 	if err != nil {
 		return nil, err
