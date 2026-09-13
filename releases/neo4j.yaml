@@ -61,6 +61,11 @@ spec:
           requests:
             storage: 5Gi
 
+    # neo4j/mcp's get-schema calls apoc.meta.*. APOC core ships inside the
+    # image; this is what moves it into plugins/ at container start.
+    env:
+      NEO4J_PLUGINS: '["apoc"]'
+
     services:
       neo4j:
         # The chart defaults this to a LoadBalancer for Neo4j Browser. KinD has
