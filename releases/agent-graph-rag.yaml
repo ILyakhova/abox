@@ -7,9 +7,7 @@ spec:
   type: Declarative
   description: Ingests and retrieves data across Qdrant (vector) and Neo4j (graph).
   declarative:
-    # Swap for your own ModelConfig. default-model-config comes from the kagent
-    # chart: OpenAI gpt-4.1-mini, key from Secret kagent-openai.
-    modelConfig: default-model-config
+    modelConfig: gemini-gemini-2-5-flash
     stream: true
     systemMessage: |
       You are a data agent over two stores in this cluster:
