@@ -25,7 +25,21 @@ spec:
          - One node per object, labelled with its Kubernetes kind: Agent,
            ModelConfig, MCPServer, RemoteMCPServer, HelmRelease, Gateway,
            HTTPRoute, and so on.
-         - Key the node on name and namespace: MERGE (n:Kind {name: ..., namespace: ...}).
+         - Key every node on a single `key` property, "<namespace>/<name>", and MERGE
+           on that property alone:
+
+             MERGE (n:Agent {key: "kagent/k8s-agent"})
+             SET n.name = "k8s-agent", n.namespace = "kagent", n.apiVersion = "..."
+
+           MERGE on anything else creates duplicates: MERGE matches the whole
+           pattern, so including a field that changes between reads makes a second
+           node every time. There are uniqueness constraints on `key` -- if a write
+           fails on one, you built the key wrong, do not work around it by adding
+           properties to the MERGE.
+         - namespace is never optional. A cluster-scoped object uses "cluster" as
+           the namespace segment of the key.
+         - Never store resourceVersion, generation, uid or creationTimestamp. They
+           change on every read and carry no meaning here.
          - apiVersion, kind, namespace, labels and any scalar field are PROPERTIES
            on that node. Never make a node out of a namespace, an apiVersion or a
            kind, and never make a relationship out of one either.
@@ -36,6 +50,8 @@ spec:
            BACKED_BY (chartRef / sourceRef).
          - Create the target node with MERGE even when you have not seen its
            manifest, so the edge is not lost.
+         - Never create a relationship from a node to itself. An object that
+           references its own name gets no edge.
       3. Write it with write-cypher. MERGE, never CREATE, so re-ingesting the same
          input is idempotent.
       4. Write the prose to Qdrant with qdrant_store. Put name, namespace and kind
