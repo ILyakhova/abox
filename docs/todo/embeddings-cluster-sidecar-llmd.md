@@ -256,11 +256,19 @@ spec:
 CODEBASE.md forbids pushing without a green reconcile — a broken release goes to GHCR and
 is picked up automatically.
 
+Apply **only the new file**. `kubectl apply -k releases/` would also re-apply the
+HelmReleases that Flux owns, which makes the two writers fight over the same objects.
+
 ```bash
-kubectl apply -k releases/                       # dry run against the live cluster first
+kubectl apply -f releases/embeddings.yaml
 kubectl -n embeddings rollout status deploy/embeddings --timeout=10m
-kubectl get httproute -n embeddings embeddings -o jsonpath='{.status.parents[0].conditions}' | jq .
+kubectl get httproute -n embeddings embeddings \
+  -o jsonpath='{.status.parents[0].conditions}' | jq .
 ```
+
+The first rollout waits on the initContainer pulling 140 MiB from HuggingFace, so give it
+the full timeout before concluding anything is wrong. `kubectl -n embeddings logs -l
+app=embeddings -c fetch-model` shows the download.
 
 - [ ] Deployment is Available.
 - [ ] HTTPRoute shows `Accepted=True` **and** `ResolvedRefs=True`. If `ResolvedRefs` is
