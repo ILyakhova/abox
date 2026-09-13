@@ -1,6 +1,6 @@
 # llm-d serving nomic-embed-text-v1.5 on CPU (embeddings URL #1).
 #
-# Mirrors the working deployment on the `the reference cluster` GKE cluster
+# Mirrors a working deployment on a reference GKE cluster
 # (helm release llm-d/llm-d-modelservice-embedding, chart v0.3.17), with four
 # deliberate deviations for abox -- each called out inline below.
 #
@@ -12,7 +12,7 @@
 #                  contend for the single available LB address. The HTTPRoute at
 #                  the bottom attaches to the existing Gateway instead.
 #
-# The InferencePool + EPP that the reference deployment runs as llm-d-pool ARE installed, at the
+# The InferencePool + EPP the reference deployment runs ARE installed, at the
 # bottom of this file. They need the inference.networking.* CRDs, which are not
 # part of Gateway API -- see releases/crds/inference-extension-crds.yaml.
 apiVersion: v1
@@ -42,8 +42,9 @@ spec:
   chart:
     spec:
       chart: llm-d-modelservice
-      # Pinned to the version the reference cluster runs. v0.4.x is current upstream but moves
-      # the values schema; bump both together after re-rendering.
+      # Pinned to the version the reference deployment runs. v0.4.x is current
+      # upstream but moves the values schema; bump both together after
+      # re-rendering.
       version: "v0.3.17"
       sourceRef:
         kind: HelmRepository
@@ -57,18 +58,36 @@ spec:
 
     modelArtifacts:
       name: nomic-ai/nomic-embed-text-v1.5
-      # vllm serve pulls the weights (~550MB safetensors) from HuggingFace on
-      # every container start -- there is no PVC or cache volume, same as the reference cluster.
-      # First Ready is therefore gated on that download, not just model load.
+      # hf:// fetches from HuggingFace. Combined with mountModelVolume below
+      # the download is cached in an emptyDir, so it survives a container
+      # restart but not pod recreation -- first Ready after a reschedule is
+      # still gated on ~550MB of safetensors, not just model load.
+      #
+      # Eliminating the re-download needs one of:
+      #
+      #   pvc://<claim>/<path>  -- model pre-staged on a PVC, zero download, but
+      #     something has to populate the PVC first and the chart does not
+      #     create it (there is no PersistentVolumeClaim template).
+      #
+      #   pvc+hf://<claim>/hub/<org>/<model> -- HF_HUB_CACHE on a PVC, so it
+      #     downloads once and persists. NOT usable on this chart version:
+      #     v0.3.17 hardcodes readOnly: true on the PVC mount, so the cache
+      #     cannot be written. v0.4.x makes it modelArtifacts.readOnly, so this
+      #     would need a chart bump.
+      #
+      #   oci:// -- would bake the weights into an image the way the llama.cpp
+      #     backend does. The volume helper implements it via a Kubernetes image
+      #     volume, but values.yaml still says "not yet supported" and image
+      #     volumes are recent enough to be a poor bet on KinD.
       uri: hf://nomic-ai/nomic-embed-text-v1.5
       size: 2Gi
       # These land on the pod template and are what the Service below selects.
       labels:
         llm-d.ai/inferenceServing: "true"
         llm-d.ai/model: nomic-embed-text-v1-5
-      # DEVIATION 1 vs the reference deployment: no authSecretName. the reference deployment points this at the
-      # llm-d-hf-token Secret, which makes the chart render an HF_TOKEN env
-      # from it -- and the pod then fails to start if the Secret is absent.
+      # DEVIATION 1: no authSecretName. The reference deployment points this at
+      # an HF token Secret, which makes the chart render an HF_TOKEN env from
+      # it -- and the pod then fails to start if that Secret is absent.
       # nomic-embed-text-v1.5 is a public repo (unlike the gated gemma weights),
       # so abox needs no token and no Secret to bootstrap.
 
@@ -80,7 +99,7 @@ spec:
       replicas: 1
       monitoring:
         podmonitor:
-          # DEVIATION 2 vs the reference deployment: off. A PodMonitor is a
+          # DEVIATION 2: off. A PodMonitor is a
           # monitoring.coreos.com/v1 object and abox ships no Prometheus
           # Operator, so leaving this on fails the release with
           # "no matches for kind PodMonitor in version monitoring.coreos.com/v1".
@@ -88,10 +107,21 @@ spec:
       containers:
         - name: vllm
           modelCommand: vllmServe
-          # DEVIATION 3 vs the reference deployment: the reference deployment runs vllm-openai-cpu:latest-x86_64,
-          # which is amd64-only and will not schedule on a KinD node running on
-          # an arm64 Mac. The unsuffixed tag is a multi-arch index (amd64 +
-          # arm64), and pinning it beats tracking :latest.
+          # The chart defaults this to true, but overriding decode.containers
+          # wholesale (as this does) drops that default. Without it no
+          # model-storage volume is rendered and HF_HOME is never set, so vllm
+          # downloads the ~550MB of weights straight into the container's
+          # writable layer on every start -- uncapped, and lost on any restart.
+          #
+          # With it, the download lands in the model-storage emptyDir bounded by
+          # modelArtifacts.size and survives a container restart within the pod.
+          # It is still re-fetched when the POD is recreated; see the note on
+          # modelArtifacts.uri for what that would take to fix properly.
+          mountModelVolume: true
+          # DEVIATION 3: the reference deployment runs
+          # vllm-openai-cpu:latest-x86_64, which is amd64-only and will not
+          # schedule on a KinD node running on an arm64 Mac. The unsuffixed tag
+          # is a multi-arch index (amd64 + arm64), and pinning beats :latest.
           image: vllm/vllm-openai-cpu:v0.29.0
           imagePullPolicy: IfNotPresent
           args:
@@ -107,19 +137,19 @@ spec:
             - "8192"
             # No CUDA graph capture / torch.compile warmup -- pure win on CPU.
             - --enforce-eager
-            # the reference deployment also passes --gpu-memory-utilization 0.5, a leftover from
-            # its GPU profile that a CPU runner ignores. Dropped.
+            # The reference deployment also passes --gpu-memory-utilization 0.5,
+            # a leftover from its GPU profile that a CPU runner ignores. Dropped.
           env:
             - name: VLLM_CPU_NUM_OF_RESERVED_CPU
               value: "1"
-            # DEVIATION 4 vs the reference deployment: 1 GiB, not 4. This is a hard up-front
+            # DEVIATION 4: 1 GiB, not the reference deployment's 4. This is a hard up-front
             # reservation and a pooling runner never fills a KV cache -- the
             # whole embed is one forward pass. On a Codespace this is the
             # difference between scheduling and OOM.
             - name: VLLM_CPU_KVCACHE_SPACE
               value: "1"
-            # 2, not the reference deployment's 4: a default Codespace is 2 vCPU total, shared with
-            # the other two kind nodes and everything else in releases/.
+            # 2, not 4: a default Codespace is 2 vCPU total, shared with the
+            # other two kind nodes and everything else in releases/.
             - name: OMP_NUM_THREADS
               value: "2"
             - name: MKL_NUM_THREADS
@@ -168,13 +198,14 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 3
-          # DEVIATION 5 vs the reference deployment: CPU sized down, memory NOT. Measured on the reference deployment's
+          # DEVIATION 5: CPU sized down, memory NOT. Measured on the reference deployment's
           # own idle embedding pod:
           #
           #   $ kubectl top pod -n llm-d
           #   llm-d-modelservice-embedding-decode-...   178m   2466Mi
           #
-          # So the reference deployment's 2 CPU request is ~11x what it uses and can come down, but
+          # So the reference deployment's 2 CPU request is ~11x what it uses
+          # and can come down, but
           # 2466Mi is a floor -- nomic-embed-text-v1.5 is a 137M-param BERT and
           # essentially all of that is the torch/vLLM runtime, not the weights.
           # Anything requesting under ~2.5Gi gets OOMKilled once it loads.
@@ -199,7 +230,8 @@ spec:
         # vllm binds routing.servicePort (8000) itself instead of 8200.
         enabled: false
 ---
-# The modelservice chart renders a Deployment but no Service (the reference deployment's were
+# The modelservice chart renders a Deployment but no Service (the reference
+# deployment's were
 # applied by hand), so it is spelled out here. Selector matches the pod labels
 # the chart derives from modelArtifacts.labels + the decode role.
 apiVersion: v1
@@ -279,7 +311,8 @@ spec:
       targetPortNumber: 8000
       modelServers:
         # Scoped to THIS model, not the blanket llm-d.ai/inferenceServing: "true"
-        # that the reference deployment uses. A pool is per base model: the moment a second model is
+        # the reference deployment uses. A pool is per base model: the moment a
+        # second model is
         # added, a blanket selector silently pulls its pods into this pool and
         # the EPP starts handing embedding requests to the wrong server.
         matchLabels:
@@ -292,7 +325,8 @@ spec:
         cpu: 500m
         memory: 256Mi
 ---
-# the reference cluster still has an InferenceModel for this, but that kind is gone: GIE dropped
+# The reference cluster still has an InferenceModel for this, but that kind is
+# gone: GIE dropped
 # inferencemodels from config/crd/bases in v1.4.0. InferenceObjective is the
 # successor, and the older copies survive only because its CRD predates the bundle
 # its cluster now runs.
