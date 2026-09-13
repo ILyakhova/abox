@@ -1,0 +1,58 @@
+# MCP servers for the two data stores, run by kagent's kmcp controller.
+# Both are stdio: kmcp adapts stdio to streamable HTTP and creates a Service
+# named after the MCPServer.
+---
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: qdrant-mcp
+  namespace: kagent
+spec:
+  transportType: stdio
+  stdioTransport: {}
+  deployment:
+    # Upstream publishes no image, only a PyPI package -- run it with uvx.
+    image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
+    cmd: uvx
+    args:
+      - mcp-server-qdrant
+    env:
+      QDRANT_URL: http://qdrant.qdrant:6333
+      COLLECTION_NAME: abox
+      # fastembed, 384 dims. Not the 768-dim nomic that llm-d and llama.cpp
+      # serve -- this collection is the agent's own memory, not theirs.
+      EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+---
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: neo4j-mcp
+  namespace: kagent
+spec:
+  transportType: stdio
+  stdioTransport: {}
+  deployment:
+    image: neo4j/mcp:v1.6.0
+    cmd: /app/neo4j-mcp
+    env:
+      NEO4J_MCP_URI: bolt://neo4j.neo4j:7687
+      NEO4J_MCP_USERNAME: neo4j
+      # Matches releases/neo4j.yaml.
+      NEO4J_MCP_PASSWORD: abox-neo4j
+      NEO4J_MCP_DATABASE: neo4j
+      NEO4J_MCP_READ_ONLY: "false"
+      NEO4J_MCP_TELEMETRY: "false"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi

@@ -1,0 +1,57 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: graph-rag-agent
+  namespace: kagent
+spec:
+  type: Declarative
+  description: Ingests and retrieves data across Qdrant (vector) and Neo4j (graph).
+  declarative:
+    # Swap for your own ModelConfig. default-model-config comes from the kagent
+    # chart: OpenAI gpt-4.1-mini, key from Secret kagent-openai.
+    modelConfig: default-model-config
+    stream: true
+    systemMessage: |
+      You are a data agent over two stores in this cluster:
+
+      - Qdrant, a vector store, via qdrant-store / qdrant-find. Free text in,
+        semantic search out. Collection: abox.
+      - Neo4j, a graph, via get-schema / read-cypher / write-cypher. Entities
+        and the relationships between them.
+
+      ## Ingest
+
+      1. Call get-schema first. Reuse existing labels and relationship types;
+         invent new ones only when nothing fits.
+      2. Write the entities and relationships to Neo4j with write-cypher. Use
+         MERGE, not CREATE, so re-ingesting the same input is idempotent.
+      3. Write the prose to Qdrant with qdrant-store. Put the Neo4j keys you
+         just merged in the metadata so a hit can be joined back to the graph.
+
+      ## Retrieve
+
+      1. qdrant-find for anything phrased as a topic or question.
+      2. Pull the identifiers out of the metadata of what came back, then
+         read-cypher to expand the neighbourhood around them.
+      3. Answer from both. Say which store each fact came from.
+
+      Never guess a schema -- call get-schema. Never run write-cypher during
+      retrieval.
+    tools:
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: MCPServer
+          name: qdrant-mcp
+          toolNames:
+            - qdrant-store
+            - qdrant-find
+      - type: McpServer
+        mcpServer:
+          apiGroup: kagent.dev
+          kind: MCPServer
+          name: neo4j-mcp
+          toolNames:
+            - get-schema
+            - read-cypher
+            - write-cypher
