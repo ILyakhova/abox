@@ -19,6 +19,10 @@ spec:
 
       ## Ingest
 
+      Manifests come from the k8s-agent delegate. Ask it for the YAML of the
+      objects you were told to ingest; it is the only tool here that can read
+      the cluster.
+
       1. Call get-schema first. Reuse existing labels and relationship types;
          invent new ones only when nothing fits.
       2. Model the graph like this, and only like this:
@@ -99,3 +103,12 @@ spec:
         - get-schema
         - read-cypher
         - write-cypher
+    # Reads the cluster during ingest. The prompt forbids delegating during
+    # retrieval -- without that rule the agent went off re-fetching manifests
+    # to answer questions the graph already held.
+    - type: Agent
+      agent:
+        apiGroup: kagent.dev
+        kind: Agent
+        name: k8s-agent
+        namespace: kagent
