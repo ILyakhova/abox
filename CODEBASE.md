@@ -14,7 +14,7 @@ abox is a **local AI infrastructure sandbox**. A single `make run` provisions a 
 
 | Layer | Tech | Version |
 |---|---|---|
-| Cluster | KinD | latest |
+| Cluster | KinD (`kindest/node`, pinned via `var.node_image`) | v1.37.0 |
 | GitOps operator | Flux CD (Flux Operator + FluxInstance) | 2.x |
 | Infrastructure as code | OpenTofu | latest |
 | AI gateway | agentgateway | v2.2.1 |
@@ -135,6 +135,10 @@ scripts/
 ---
 
 ## Key Design Decisions
+
+**KinD is created by the kind CLI, not the `tehcyx/kind` provider** — the provider vendors `sigs.k8s.io/kind` v0.31.0, which emits `kubeadm.k8s.io/v1beta3` only. Kubernetes 1.36 removed `v1beta3`, so any node image at or above v1.36 fails `kubeadm init`. `cluster.tf` shells out to the kind CLI installed by `scripts/setup.sh` (v0.33.0) and pins the image through `var.node_image`.
+
+This also removes a replacement trap: the `helm`/`kubernetes`/`kubectl` providers previously took host and certificates from `kind_cluster.this` attributes, so replacing the cluster left them unconfigured and falling back to `http://localhost`. They now read `var.kubeconfig_path`, which is known at plan time.
 
 **No github_token in Terraform** — Flux is bootstrapped via Helm charts, not `flux_bootstrap_git`. This avoids the need for a deploy key or PAT in OpenTofu state.
 

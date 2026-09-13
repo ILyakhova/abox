@@ -9,7 +9,7 @@ module "flux_operator" {
   source  = "controlplaneio-fluxcd/flux-operator-bootstrap/kubernetes"
   version = "0.8.0"
 
-  depends_on = [kind_cluster.this]
+  depends_on = [terraform_data.cluster]
 
   revision = var.bootstrap_revision
 

@@ -4,9 +4,9 @@ terraform {
   required_version = ">= 1.11.0"
 
   required_providers {
-    kind = {
-      source  = "tehcyx/kind"
-      version = ">= 0.8"
+    local = {
+      source  = "hashicorp/local"
+      version = ">= 2.4"
     }
     helm = {
       source  = "hashicorp/helm"
@@ -23,28 +23,24 @@ terraform {
   }
 }
 
-provider "kind" {}
-
+# Read through terraform_data.cluster.output, not the variables directly. The
+# output is known-after-apply, which defers provider configuration until the
+# cluster exists; a static path configures at plan time and fails with
+# "context kind-abox does not exist" on a first apply.
 provider "helm" {
   kubernetes = {
-    host                   = kind_cluster.this.endpoint
-    client_certificate     = kind_cluster.this.client_certificate
-    client_key             = kind_cluster.this.client_key
-    cluster_ca_certificate = kind_cluster.this.cluster_ca_certificate
+    config_path    = terraform_data.cluster.output.kubeconfig
+    config_context = terraform_data.cluster.output.context
   }
 }
 
 provider "kubernetes" {
-  host                   = kind_cluster.this.endpoint
-  client_certificate     = kind_cluster.this.client_certificate
-  client_key             = kind_cluster.this.client_key
-  cluster_ca_certificate = kind_cluster.this.cluster_ca_certificate
+  config_path    = terraform_data.cluster.output.kubeconfig
+  config_context = terraform_data.cluster.output.context
 }
 
 provider "kubectl" {
-  host                   = kind_cluster.this.endpoint
-  client_certificate     = kind_cluster.this.client_certificate
-  client_key             = kind_cluster.this.client_key
-  cluster_ca_certificate = kind_cluster.this.cluster_ca_certificate
-  load_config_file       = false
+  config_path      = terraform_data.cluster.output.kubeconfig
+  config_context   = terraform_data.cluster.output.context
+  load_config_file = true
 }

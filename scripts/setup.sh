@@ -30,9 +30,8 @@ log "Installing OpenTofu..."
 curl -fsSL https://get.opentofu.org/install-opentofu.sh | sh -s -- --install-method standalone
 log "OpenTofu installed"
 
-# Install kind CLI. The cluster itself is created by the tehcyx/kind Terraform
-# provider, which embeds kind, but the CLI is needed for node-level work:
-# kind get nodes, kind load docker-image, kind export logs.
+# Install kind CLI. bootstrap/cluster.tf shells out to it to create the
+# cluster, so this version sets the Kubernetes version ceiling.
 if [[ -n "${PLATFORM_OS}" && -n "${PLATFORM_ARCH}" ]]; then
   log "Installing kind..."
   KIND_VERSION=v0.33.0

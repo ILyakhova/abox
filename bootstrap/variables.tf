@@ -4,6 +4,18 @@ variable "cluster_name" {
   default     = "abox"
 }
 
+variable "node_image" {
+  description = "KinD node image. Ceiling is the kind CLI version installed by scripts/setup.sh."
+  type        = string
+  default     = "kindest/node:v1.37.0"
+}
+
+variable "kubeconfig_path" {
+  description = "Kubeconfig written by kind and read by the helm/kubernetes/kubectl providers."
+  type        = string
+  default     = "~/.kube/config"
+}
+
 variable "oci_registry" {
   description = "OCI registry base URL"
   type        = string
