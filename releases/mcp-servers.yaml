@@ -1,6 +1,5 @@
-# MCP servers for the two data stores, run by kagent's kmcp controller.
-# Both are stdio: kmcp adapts stdio to streamable HTTP and creates a Service
-# named after the MCPServer.
+# MCP servers run by kagent's kmcp controller. kmcp creates a Service named
+# after the MCPServer and adapts stdio servers to streamable HTTP.
 ---
 apiVersion: kagent.dev/v1alpha1
 kind: MCPServer
@@ -8,15 +7,26 @@ metadata:
   name: qdrant-mcp
   namespace: kagent
 spec:
-  transportType: stdio
-  stdioTransport: {}
+  # http, not stdio: FastMCP's stdio loop exits on stdin EOF, so every session
+  # teardown killed the container. Restarting meant a fresh uvx install and a
+  # re-fetch of the ONNX weights, ~14s during which calls got
+  # "connect: connection refused".
+  transportType: http
+  httpTransport:
+    targetPort: 8000
+    path: /mcp
   deployment:
     # Upstream publishes no image, only a PyPI package -- run it with uvx.
     image: ghcr.io/astral-sh/uv:python3.12-bookworm-slim
     cmd: uvx
     args:
       - mcp-server-qdrant
+      - --transport
+      - streamable-http
+    port: 8000
     env:
+      FASTMCP_SERVER_HOST: 0.0.0.0
+      FASTMCP_SERVER_PORT: "8000"
       QDRANT_URL: http://qdrant.qdrant:6333
       # New collection: the vector is named after the model
       # (fast-nomic-embed-text-v1-5), so the old MiniLM one cannot be reused.
