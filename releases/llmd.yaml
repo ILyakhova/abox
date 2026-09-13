@@ -58,27 +58,17 @@ spec:
 
     modelArtifacts:
       name: nomic-ai/nomic-embed-text-v1.5
-      # An OCI image holding only the HF-format weights, mounted as a Kubernetes
-      # image volume (KEP-4639). Needs containerd >= 2.0 and the ImageVolume
-      # feature gate; both are present on kind v1.37 nodes.
-      #
-      # hf:// would re-download ~550MB from HuggingFace on every pod creation.
-      # pvc:// needs something to pre-populate the claim and the chart has no
-      # PVC template. pvc+hf:// is unusable here because v0.3.17 hardcodes
-      # readOnly on the PVC mount, so the cache cannot be written.
-      uri: oci://ghcr.io/den-vasyliev/abox/nomic-embed-hf:v1.5
-      # The chart hardcodes pullPolicy Always for oci:// and its values schema
-      # rejects modelArtifacts.imagePullPolicy until v0.4.x, so the image has to
-      # be resolvable from the registry -- a `kind load` is not enough.
+      # The GGUF image from images/nomic-embed, mounted as a Kubernetes image
+      # volume (KEP-4639) rather than downloaded. Needs containerd >= 2.0 and
+      # the ImageVolume gate; both are present on the kind v1.37 nodes. The
+      # model lands at <mountPath>/models/model.gguf because an image volume
+      # mounts the image rootfs.
+      uri: oci://ghcr.io/den-vasyliev/abox/nomic-embed:v1.18.1-4ccc0ff
       mountPath: /model-cache
       # These land on the pod template and are what the Service below selects.
       labels:
         llm-d.ai/inferenceServing: "true"
         llm-d.ai/model: nomic-embed-text-v1-5
-      # DEVIATION 1: no authSecretName. The reference deployment points this at
-      # an HF token Secret, which makes the chart render an HF_TOKEN env from
-      # it -- and the pod then fails to start if that Secret is absent. Nothing
-      # is fetched from HuggingFace at all now.
 
     prefill:
       create: false
@@ -88,115 +78,55 @@ spec:
       replicas: 1
       monitoring:
         podmonitor:
-          # DEVIATION 2: off. A PodMonitor is a
-          # monitoring.coreos.com/v1 object and abox ships no Prometheus
-          # Operator, so leaving this on fails the release with
-          # "no matches for kind PodMonitor in version monitoring.coreos.com/v1".
+          # abox ships no Prometheus Operator, so leaving this on fails the
+          # release with "no matches for kind PodMonitor in version
+          # monitoring.coreos.com/v1".
           enabled: false
-      volumes:
-        # Chart default, kept because overriding this list replaces it.
-        - name: metrics-volume
-          emptyDir: {}
-        # Kubernetes defaults /dev/shm to 64Mi. vLLM's multiproc executor
-        # allocates a 160Mi shm ring buffer and dies without this:
-        #   RuntimeError: Insufficient space in /dev/shm: 160 MiB required,
-        #   64 MiB free.
-        - name: dshm
-          emptyDir:
-            medium: Memory
-            sizeLimit: 512Mi
       containers:
-        - name: vllm
-          # `custom` rather than `vllmServe`: the chart's argsByProtocol has no
-          # oci:// branch and hard-fails ("arguments for oci:// not
-          # implemented"). customModelCommand emits only command/args, so it
-          # never reaches that code path. The image volume is still rendered.
+        - name: llama-cpp
+          # `custom` rather than `vllmServe` or `imageDefault`: both of those go
+          # through argsByProtocol, which hard-fails on oci:// ("arguments for
+          # oci:// not implemented"). customModelCommand emits only
+          # command/args, so the image volume is still rendered but that code
+          # path is never reached.
           modelCommand: custom
-          # Renders the model-storage image volume and mounts it readOnly at
-          # modelArtifacts.mountPath. Overriding decode.containers wholesale
-          # drops the chart's default of true.
-          mountModelVolume: true
-          # DEVIATION 3: the reference deployment runs
-          # vllm-openai-cpu:latest-x86_64, which is amd64-only and will not
-          # schedule on a KinD node running on an arm64 Mac. The unsuffixed tag
-          # is a multi-arch index (amd64 + arm64), and pinning beats :latest.
-          image: vllm/vllm-openai-cpu:v0.29.0
+          # llama.cpp, not vLLM. vLLM's CPU backend cannot serve this model
+          # here: the worker process is killed by a signal on the first forward
+          # pass, at float16 and bfloat16 alike, and with the memory limit
+          # raised to 9Gi, so it is not OOM. llama.cpp serves the same model
+          # from the same weights in a fraction of the memory.
+          image: ghcr.io/ggml-org/llama.cpp:server-b10920
           imagePullPolicy: IfNotPresent
-          command: ["vllm", "serve"]
+          # Renders the model-storage image volume and mounts it readOnly at
+          # modelArtifacts.mountPath.
+          mountModelVolume: true
+          command: ["/app/llama-server"]
           args:
-            # The mounted image volume, not a HuggingFace repo id.
-            - /model-cache
-            # Keeps the OpenAI-visible model name stable now that the path is
-            # what vllm is given.
-            - --served-model-name
-            - nomic-ai/nomic-embed-text-v1.5
-            # vllmServe supplied this; custom does not.
+            - --host
+            - 0.0.0.0
             - --port
             - "8000"
-            # --runner pooling is the v0.29 spelling of the old --task embed:
-            # it puts the engine in pooling mode so /v1/embeddings is served
-            # and the generation endpoints are not.
-            - --runner
-            - pooling
-            - --max-model-len
-            - "8192"
-            # No CUDA graph capture / torch.compile warmup -- pure win on CPU.
-            - --enforce-eager
-            # --trust-remote-code is deliberately absent. config.json's auto_map
-            # points at a second repo (nomic-ai/nomic-bert-2048), so it would
-            # reintroduce a HuggingFace fetch at startup. vLLM 0.29 registers
-            # NomicBertModel natively (bert_with_rope), so none is needed.
-          volumeMounts:
-            - name: dshm
-              mountPath: /dev/shm
-          env:
-            - name: VLLM_CPU_NUM_OF_RESERVED_CPU
-              value: "1"
-            # DEVIATION 4: 1 GiB, not the reference deployment's 4. This is a hard up-front
-            # reservation and a pooling runner never fills a KV cache -- the
-            # whole embed is one forward pass. On a Codespace this is the
-            # difference between scheduling and OOM.
-            - name: VLLM_CPU_KVCACHE_SPACE
-              value: "1"
-            # 2, not 4: a default Codespace is 2 vCPU total, shared with the
-            # other two kind nodes and everything else in releases/.
-            - name: OMP_NUM_THREADS
-              value: "2"
-            - name: MKL_NUM_THREADS
-              value: "2"
-            # Rust frontend, in place of the Python API server process. This is
-            # the single best lever available here, for two reasons.
-            #
-            # Memory: the 2452Mi measured on the reference cluster is three Python processes
-            # each importing torch -- Worker 1294MiB, API server 621MiB,
-            # EngineCore 491MiB. This flag is what replaces that 621MiB API
-            # server; the engine and the ZMQ boundary are unchanged.
-            #
-            # Throughput: upstream reports ~837 req/s vs ~162 for the Python
-            # frontend on a preprocess-heavy workload. Embeddings are the
-            # extreme case of preprocess-heavy -- tokenization dominates and the
-            # forward pass through a 137M-param BERT is trivial -- so this
-            # workload should sit at the favourable end of that range, not the
-            # marginal one.
-            #
-            # Note it does NOT fall back: envs.py raises FileNotFoundError if
-            # the vllm-rs binary is missing. It is present in this image --
-            # docker/Dockerfile.cpu at v0.29.0 builds it in a dedicated stage
-            # and line 224 copies it to vllm/vllm-rs, which is exactly where
-            # _resolve_rust_cli_path looks. Verify that again before bumping the
-            # image tag.
-            - name: VLLM_USE_RUST_FRONTEND
-              value: "1"
+            - --embeddings
+            # 16384 over --parallel 8 is 2048 tokens per slot, nomic's full
+            # window. --ubatch-size must be at least a slot because a pooled
+            # embedding has to fit in one micro-batch, which makes it the real
+            # per-request ceiling rather than --ctx-size.
+            - --ctx-size
+            - "16384"
+            - --ubatch-size
+            - "2048"
+            - --parallel
+            - "8"
+            - --model
+            - /model-cache/models/model.gguf
           ports:
             - containerPort: 8000
               name: metrics
-          # initialDelaySeconds is generous on purpose: it covers the
-          # HuggingFace download above plus model load.
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 60
+            initialDelaySeconds: 10
             periodSeconds: 10
             timeoutSeconds: 5
             failureThreshold: 3
@@ -204,40 +134,27 @@ spec:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 120
+            initialDelaySeconds: 30
             periodSeconds: 30
             timeoutSeconds: 10
             failureThreshold: 3
-          # DEVIATION 5: CPU sized down, memory NOT. Measured on the reference deployment's
-          # own idle embedding pod:
-          #
-          #   $ kubectl top pod -n llm-d
-          #   llm-d-modelservice-embedding-decode-...   178m   2466Mi
-          #
-          # So the reference deployment's 2 CPU request is ~11x what it uses
-          # and can come down, but
-          # 2466Mi is a floor -- nomic-embed-text-v1.5 is a 137M-param BERT and
-          # essentially all of that is the torch/vLLM runtime, not the weights.
-          # Anything requesting under ~2.5Gi gets OOMKilled once it loads.
-          #
-          # For contrast, llama.cpp serves the same model in ~75Mi
-          # (releases/llama-cpp-embeddings.yaml). That gap IS the thing being
-          # evaluated here -- do not "fix" it by starving this pod.
+          # The GGUF is mmap'd from the read-only image volume, so the weights
+          # are file-backed and do not count against the working set.
           resources:
             requests:
               cpu: 250m
-              memory: 2560Mi
+              memory: 256Mi
             limits:
               cpu: "2"
-              memory: 4Gi
+              memory: 1Gi
 
     routing:
       servicePort: 8000
       proxy:
         # The llm-d-routing-sidecar is a nixl connector for prefill/decode
         # disaggregation. With prefill.create false there is nothing to
-        # disaggregate, and it only adds a hop in front of vllm. Off here means
-        # vllm binds routing.servicePort (8000) itself instead of 8200.
+        # disaggregate. Off here means the server binds routing.servicePort
+        # (8000) directly.
         enabled: false
 ---
 # The modelservice chart renders a Deployment but no Service (the reference

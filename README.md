@@ -11,7 +11,7 @@
 | **agentgateway v2.2.1** | AI-aware API gateway (Gateway API–native, MCP-aware) |
 | **kagent 0.10.1** | Kubernetes-native AI agent framework |
 | **Qdrant 1.19.1** | Vector database for retrieval |
-| **llm-d v0.3.17** | Distributed inference serving — vLLM + InferencePool/EPP, serving `nomic-embed-text-v1.5` |
+| **llm-d v0.3.17** | Distributed inference serving — llama.cpp + InferencePool/EPP, serving `nomic-embed-text-v1.5` |
 | **llama.cpp** | Second, lightweight embeddings backend — same model as f16 GGUF |
 | **Arize Phoenix 12.0.10** | LLM observability — tracing, evals, prompt playground |
 | **Flux CD 2.x** | GitOps/GitLessOps operator — keeps the cluster in sync with OCI artifacts |
@@ -78,11 +78,13 @@ single-process server.
 
 | | backend | in-cluster | via gateway |
 |---|---|---|---|
-| #1 | llm-d — vLLM behind an InferencePool + endpoint picker | `llm-d-embedding.llm-d:8000` | `http://<gw-ip>/llmd/v1/embeddings` |
+| #1 | llm-d — llama.cpp behind an InferencePool + endpoint picker | `llm-d-embedding.llm-d:8000` | `http://<gw-ip>/llmd/v1/embeddings` |
 | #2 | llama.cpp — one `llama-server --embeddings` pod | `llama-cpp-embeddings.llama-cpp:8090` | `http://<gw-ip>/llamacpp/v1/embeddings` |
 
-The llama.cpp backend runs a **prebuilt image with the model baked in**
+Both backends run the **prebuilt image with the model baked in**
 (`images/nomic-embed/`), so nothing is pulled from HuggingFace at pod start.
+Backend #2 runs it directly; backend #1 mounts it as a Kubernetes **image
+volume** (KEP-4639) and runs the stock `llama.cpp` server against it.
 ```
 ghcr.io/den-vasyliev/abox/nomic-embed:v1.18.1-4ccc0ff
 ```
@@ -138,57 +140,40 @@ kubectl logs -n llm-d deploy/llm-d-pool-epp                  # endpoint picker d
 kubectl top pod -n llm-d; kubectl top pod -n llama-cpp       # steady-state cost
 ```
 
-- **Startup**: vLLM re-downloads the weights from HuggingFace on every container
-  start — there is no cache volume. llama.cpp pulls its image once and the model
-  is already in it. Expect llm-d to be far slower to first Ready.
-- **Footprint** is the headline number. Measured on the pods these are modelled
-  on, both idle, serving the same model:
+- **Both backends are llama.cpp.** vLLM was the original backend for #1 and does
+  not work on CPU here: with `--runner pooling`, the model loads and the server
+  answers `/health` and `/v1/models`, but the worker process is killed by a
+  signal on the first forward pass and every `/v1/embeddings` returns 500. It
+  reproduces at `float16` and `bfloat16` alike and with the memory limit raised
+  to 9Gi, so it is not OOM. `releases/llmd.yaml` keeps the full llm-d stack —
+  modelservice chart, InferencePool, EPP, InferenceObjective — and only swaps
+  the serving container.
 
-  | | CPU | memory (idle) |
-  |---|---|---|
-  | vLLM (`llm-d` on the reference cluster) | 139m | **2452Mi** |
-  | llama.cpp (production llama.cpp embedder) | 1m | **~75Mi** |
+  Two more things were ruled out along the way, both worth knowing:
 
-  Two things drive that gap, and neither is the model — nomic-embed-text-v1.5 is
-  a 137M-param BERT.
+  **`VLLM_USE_RUST_FRONTEND=1` cannot serve embeddings.** The Rust frontend
+  registers only `/health`, `/metrics`, `/load`, `/version`, `/v1/models`,
+  `/v1/completions`, `/v1/chat/completions`, `/tokenize`, `/detokenize` and
+  `/inference/v1/generate` (`rust/src/server/src/routes.rs`). There is no
+  `/v1/embeddings`, so a pooling runner behind it 404s every embed request
+  while looking perfectly healthy.
 
-  **vLLM runs three Python processes, each importing torch.** Measured inside
-  the container: `VLLM::Worker` 1294MiB, API server 621MiB, `EngineCore`
-  491MiB. The API server holds *no model at all* and still costs 621MiB — that
-  is the floor for "Python with torch imported", paid three times over before a
-  single weight loads.
+  **`--max-model-len 8192` is rejected**, though the reference cluster runs it.
+  vLLM derives the limit as `min()` over every length key in the config
+  (`derive_max_model_len_and_key`), and this model's config carries both
+  `max_position_embeddings: 2048` and `n_positions: 8192`, so 2048 wins.
+  `--trust-remote-code` makes no difference. 2048 is also the model's real
+  `max_trained_positions`.
 
-  **The weights are held differently.** vLLM loads a 522MB float32 safetensors
-  into anonymous memory: private, dirty, unreclaimable, not shared across those
-  three processes. llama.cpp mmaps a 274MB f16 GGUF straight from the image
-  layer — file-backed, clean, evictable — so most of it doesn't count toward
-  the working set at all.
+- **What the comparison is now.** Not vLLM vs llama.cpp, but *llm-d-managed*
+  vs *plain Deployment* — same engine, same weights, same vectors. What #1 adds
+  is the InferencePool, the endpoint picker, and the modelservice chart's
+  prefill/decode shape. That is the thing actually being evaluated.
 
-  Treat the 75Mi as a floor, not a steady state: it is an idle pod whose weight
-  pages have gone inactive. Under sustained load they become active and count
-  again, toward llama.cpp's own startup projection of 236MiB. So the fair
-  comparison is roughly **236MiB vs 2.4Gi — about 10x, not 30x.**
+- **Startup**: neither backend contacts HuggingFace. #2 has the weights in its
+  own image layer; #1 mounts them from an image volume, so they are pulled once
+  per node by the kubelet and cached like any other image.
 
-  Requests here are set from these measurements. Don't starve the vLLM pod
-  below ~2.5Gi; it will OOMKill on load.
-
-- **The Rust frontend is on** (`VLLM_USE_RUST_FRONTEND=1`). It replaces the
-  Python API server — the 621MiB process above — leaving the engine and the ZMQ
-  boundary untouched. Upstream reports ~837 req/s vs ~162 for the Python
-  frontend on preprocess-heavy work, and embeddings are the extreme case of
-  that: tokenization dominates, the forward pass through a 137M-param BERT is
-  trivial. Two things worth measuring here, since the 2560Mi request was set
-  before it was enabled:
-
-  ```bash
-  kubectl top pod -n llm-d --containers          # did the ~620MiB actually go?
-  kubectl exec -n llm-d deploy/llm-d-embedding-llm-d-modelservice-decode -c vllm \
-    -- sh -c 'for p in /proc/[0-9]*; do awk "/^Name:|^VmRSS:/{printf \"%s \", \$2}END{print \"\"}" $p/status; done | sort -k2 -rn | head'
-  ```
-
-  If the API server process is gone, the memory request can come down. It does
-  **not** fall back — vLLM raises `FileNotFoundError` if the `vllm-rs` binary is
-  absent — so re-check it is present before bumping the image tag.
 - **Concurrency**: llama.cpp is fixed at 8 slots (`--parallel 8`). vLLM batches
   continuously — this is where it should pull ahead.
 - **Scaling out**: raising `decode.replicas` puts real work in front of the EPP.
