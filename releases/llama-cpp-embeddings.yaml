@@ -68,18 +68,19 @@ spec:
             - "8090"
             # Without this the server exposes completions, not /v1/embeddings.
             - --embeddings
-            # 16384 / --parallel 8 = 2048 tokens per slot, which is nomic's full
-            # context window. --ubatch-size must be >= a slot because a pooled
-            # embedding has to fit in a single micro-batch; it is the real
-            # per-request ceiling here, not --ctx-size.
+            # One slot of 8192, not eight of 2048. A pooled embedding has to fit
+            # in a single micro-batch, so --ubatch-size is the per-request
+            # ceiling: at 2048 a whole manifest is rejected outright with
+            # "input (5202 tokens) is too large to process". Concurrency drops
+            # to one request at a time, which is the trade for accepting them.
             - --ctx-size
-            - "16384"
+            - "8192"
             - --ubatch-size
-            - "2048"
+            - "8192"
             - --model
             - /models/model.gguf
             - --parallel
-            - "8"
+            - "1"
           ports:
             - containerPort: 8090
               name: http
@@ -118,7 +119,9 @@ spec:
               memory: 512Mi
             limits:
               cpu: "2"
-              memory: 1Gi
+              # The compute buffer scales with --ubatch-size, and that went 2048
+              # -> 8192.
+              memory: 2Gi
 ---
 apiVersion: v1
 kind: Service
