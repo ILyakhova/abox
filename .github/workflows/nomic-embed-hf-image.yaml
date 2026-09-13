@@ -1,0 +1,45 @@
+# Builds the HF-format nomic-embed-text-v1.5 weights image for llm-d/vLLM.
+# Separate from the v* release tags: the weights change only when the pinned
+# MODEL_REV or the Dockerfile does.
+name: Build nomic-embed-hf image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'images/nomic-embed-hf/**'
+      - '.github/workflows/nomic-embed-hf-image.yaml'
+  workflow_dispatch:
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}/nomic-embed-hf
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # No qemu: the final stage is FROM scratch and the fetch stage is pinned
+      # to BUILDPLATFORM, so the weights are arch-independent.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: images/nomic-embed-hf
+          push: true
+          tags: ${{ env.IMAGE }}:v1.5
