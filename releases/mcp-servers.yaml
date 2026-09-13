@@ -58,18 +58,3 @@ spec:
       limits:
         cpu: 500m
         memory: 256Mi
----
-# Points at the Service kmcp creates for the MCPServer above. Lets an Agent in
-# another namespace, or one that needs per-agent headers, reach the same server.
-apiVersion: kagent.dev/v1alpha2
-kind: RemoteMCPServer
-metadata:
-  name: llama
-  namespace: kagent
-spec:
-  description: llama.cpp bridge -- health, props, models, tokenize, embed, chat.
-  protocol: STREAMABLE_HTTP
-  url: http://llama-bridge.kagent:3000/mcp
-  timeout: 120s
-  allowedNamespaces:
-    from: All
