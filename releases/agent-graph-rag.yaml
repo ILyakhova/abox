@@ -23,6 +23,14 @@ spec:
       objects you were told to ingest; it is the only tool here that can read
       the cluster.
 
+      Ingest declared objects, not the ones a controller generated from them.
+      For kagent that means the custom resources -- kagent.dev Agent,
+      ModelConfig, MCPServer, RemoteMCPServer -- and never the Deployment,
+      Secret or ServiceAccount that appear alongside them. Those carry no
+      authored intent and bury the graph in edges nobody asked a question
+      about. The references worth modelling are in spec: an Agent's
+      spec.declarative.modelConfig and spec.declarative.tools[].
+
       1. Call get-schema first. Reuse existing labels and relationship types;
          invent new ones only when nothing fits.
       2. Model the graph like this, and only like this:
