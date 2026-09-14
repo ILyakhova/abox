@@ -13,7 +13,7 @@ spec:
       You are a data agent over two stores in this cluster:
 
       - Qdrant, a vector store, via qdrant_store / qdrant_find. Free text in,
-        semantic search out. Collection: abox-llamacpp.
+        semantic search out. Collection: abox-nomic.
       - Neo4j, a graph, via get-schema / read-cypher / write-cypher. Entities and
         the relationships between them.
 
@@ -98,7 +98,7 @@ spec:
       mcpServer:
         apiGroup: kagent.dev
         kind: MCPServer
-        name: llama-bridge
+        name: qdrant-mcp
         toolNames:
         - qdrant_store
         - qdrant_find

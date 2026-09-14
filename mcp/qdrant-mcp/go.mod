@@ -1,4 +1,4 @@
-module github.com/den-vasyliev/abox/mcp/llama-bridge
+module github.com/den-vasyliev/abox/mcp/qdrant-mcp
 
 go 1.23.0
 

@@ -31,26 +31,31 @@ spec:
 apiVersion: kagent.dev/v1alpha1
 kind: MCPServer
 metadata:
-  name: llama-bridge
+  name: qdrant-mcp
   namespace: kagent
 spec:
   transportType: stdio
   stdioTransport: {}
   deployment:
-    # Scaffolded with `kmcp init go`; source in mcp/llama-bridge.
-    image: ghcr.io/den-vasyliev/abox/llama-bridge:0.2.2
+    # Ours; scaffolded with `kmcp init go`, source in mcp/qdrant-mcp. Replaces
+    # mcp-server-qdrant, which could only embed in-process with fastembed and
+    # was OOMKilled doing it.
+    image: ghcr.io/den-vasyliev/abox/qdrant-mcp:0.3.0
     cmd: /app/server
     env:
-      # The standalone llama.cpp Deployment, started with --embeddings. So
-      # llama_embed, llama_health, llama_props, llama_models and llama_tokenize
-      # work; llama_chat gets a 501 until a generative server is pointed at.
-      LLAMA_BASE_URL: http://llama-cpp-embeddings.llama-cpp:8090
-      # qdrant_store / qdrant_find embed through LLAMA_BASE_URL, so the agent's
-      # memory lands in the same vector space the gateway serves. Replaces
-      # mcp-server-qdrant, which could only embed in-process with fastembed and
-      # was OOMKilled doing it.
+      # Any OpenAI-compatible /v1/embeddings route. This one is the standalone
+      # llama.cpp Deployment, started with --embeddings, so llama_chat gets a
+      # 501 until a generative server is pointed at. Swap in llm-d with
+      # http://llm-d-embedding.llm-d:8000 plus EMBEDDINGS_MODEL, or a managed
+      # endpoint plus EMBEDDINGS_API_KEY -- see mcp/qdrant-mcp/README.md.
+      EMBEDDINGS_BASE_URL: http://llama-cpp-embeddings.llama-cpp:8090
+      # qdrant_store / qdrant_find embed through the same endpoint, so the
+      # agent's memory lands in the vector space the gateway serves. The
+      # collection is named for the model, not the runtime: dimensions differ
+      # between models and the same model under a different runtime still moves
+      # the vectors, so repointing EMBEDDINGS_BASE_URL means a new collection.
       QDRANT_URL: http://qdrant.qdrant:6333
-      QDRANT_COLLECTION: abox-llamacpp
+      QDRANT_COLLECTION: abox-nomic
     resources:
       requests:
         cpu: 25m

@@ -12,22 +12,41 @@ import (
 	"time"
 )
 
-// The llama.cpp server this bridge talks to. abox serves two of them:
+// The embeddings endpoint. Anything serving OpenAI-compatible
+// /v1/embeddings will do -- abox has two routes to the same model:
 //
-//	llama-cpp-embeddings.llama-cpp:8090   standalone Deployment
+//	llama-cpp-embeddings.llama-cpp:8090   standalone llama.cpp Deployment
 //	llm-d-embedding.llm-d:8000            the same engine under llm-d
+//
+// The llama_* tools additionally use llama.cpp's own /props and /tokenize,
+// so those return an error against a server that does not implement them.
 const defaultBaseURL = "http://llama-cpp-embeddings.llama-cpp:8090"
 
+// LLAMA_BASE_URL is the pre-rename spelling, still honoured so an older
+// manifest keeps working.
 func baseURL() string {
+	if v := os.Getenv("EMBEDDINGS_BASE_URL"); v != "" {
+		return v
+	}
 	if v := os.Getenv("LLAMA_BASE_URL"); v != "" {
 		return v
 	}
 	return defaultBaseURL
 }
 
+// Model id sent as "model" on embeddings requests. llama.cpp serves a single
+// model and ignores it; llm-d routes on it and Vertex requires it.
+func embeddingsModel() string {
+	return os.Getenv("EMBEDDINGS_MODEL")
+}
+
 func client() *http.Client {
 	secs := 120
-	if v := os.Getenv("LLAMA_TIMEOUT_SECONDS"); v != "" {
+	v := os.Getenv("EMBEDDINGS_TIMEOUT_SECONDS")
+	if v == "" {
+		v = os.Getenv("LLAMA_TIMEOUT_SECONDS")
+	}
+	if v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			secs = n
 		}
@@ -53,6 +72,11 @@ func do(ctx context.Context, method, path string, body any) (string, error) {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	// Unset for an in-cluster llama.cpp or llm-d; a managed endpoint such as
+	// Vertex's OpenAI-compatible one needs it.
+	if k := os.Getenv("EMBEDDINGS_API_KEY"); k != "" {
+		req.Header.Set("Authorization", "Bearer "+k)
 	}
 
 	resp, err := client().Do(req)

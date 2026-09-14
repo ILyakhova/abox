@@ -31,7 +31,7 @@ func text(s string) *mcp.CallToolResultFor[Raw] {
 func Health() MCPTool[Empty, Raw] {
 	return MCPTool[Empty, Raw]{
 		Name:        "llama_health",
-		Description: "Check whether the llama.cpp server is up and has finished loading its model.",
+		Description: "Check whether the embeddings server is up and has finished loading its model.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, _ *mcp.CallToolParamsFor[Empty]) (*mcp.CallToolResultFor[Raw], error) {
 			out, err := get(ctx, "/health")
 			if err != nil {
@@ -59,7 +59,7 @@ func Props() MCPTool[Empty, Raw] {
 func Models() MCPTool[Empty, Raw] {
 	return MCPTool[Empty, Raw]{
 		Name:        "llama_models",
-		Description: "List the models the llama.cpp server has loaded.",
+		Description: "List the models the configured server has loaded.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, _ *mcp.CallToolParamsFor[Empty]) (*mcp.CallToolResultFor[Raw], error) {
 			out, err := get(ctx, "/v1/models")
 			if err != nil {
@@ -72,7 +72,7 @@ func Models() MCPTool[Empty, Raw] {
 
 type EmbedParams struct {
 	Input string `json:"input" description:"Text to embed."`
-	Model string `json:"model,omitempty" description:"Model id. Optional; llama.cpp serves one model and ignores this."`
+	Model string `json:"model,omitempty" description:"Model id. Optional; defaults to EMBEDDINGS_MODEL. llama.cpp serves one model and ignores it."`
 }
 
 func Embed() MCPTool[EmbedParams, Raw] {
@@ -81,8 +81,12 @@ func Embed() MCPTool[EmbedParams, Raw] {
 		Description: "Embed text and return the vector. nomic-embed expects a 'search_document: ' or 'search_query: ' prefix on the input.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, p *mcp.CallToolParamsFor[EmbedParams]) (*mcp.CallToolResultFor[Raw], error) {
 			body := map[string]any{"input": p.Arguments.Input}
-			if p.Arguments.Model != "" {
-				body["model"] = p.Arguments.Model
+			model := p.Arguments.Model
+			if model == "" {
+				model = embeddingsModel()
+			}
+			if model != "" {
+				body["model"] = model
 			}
 			out, err := post(ctx, "/v1/embeddings", body)
 			if err != nil {

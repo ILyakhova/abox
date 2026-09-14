@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/den-vasyliev/abox/mcp/llama-bridge/internal/tools"
+	"github.com/den-vasyliev/abox/mcp/qdrant-mcp/internal/tools"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -27,7 +27,11 @@ func main() {
 
 func run() error {
 	// Create the MCP server
-	server := mcp.NewServer(&mcp.Implementation{Name: "llama-bridge", Version: "0.1.0"}, nil)
+	server := mcp.NewServer(&mcp.Implementation{
+		Name:    "qdrant-mcp",
+		Title:   "Qdrant MCP with pluggable embeddings",
+		Version: "0.3.0",
+	}, nil)
 
 	// Register tools
 	tools.AddToolsToServer(server)

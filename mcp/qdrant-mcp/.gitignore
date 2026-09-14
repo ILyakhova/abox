@@ -19,9 +19,9 @@ go.work.sum
 # vendor/
 
 # Go extra files
-llama-bridge
+qdrant-mcp
 /server
-/llama-bridge
+/qdrant-mcp
 *.log
 
 # Docker

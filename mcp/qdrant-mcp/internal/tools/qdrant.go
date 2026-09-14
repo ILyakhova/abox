@@ -142,11 +142,36 @@ func chunk(s string) []string {
 
 // nomic is trained with an instruction prefix and the two are not
 // interchangeable: a document embedded as a query lands in the wrong place.
+// Other models want no prefix at all, so both are overridable -- including to
+// the empty string, which is why this reads LookupEnv rather than Getenv.
+const (
+	defaultDocumentPrefix = "search_document: "
+	defaultQueryPrefix    = "search_query: "
+)
+
+func documentPrefix() string {
+	if v, ok := os.LookupEnv("EMBEDDINGS_DOCUMENT_PREFIX"); ok {
+		return v
+	}
+	return defaultDocumentPrefix
+}
+
+func queryPrefix() string {
+	if v, ok := os.LookupEnv("EMBEDDINGS_QUERY_PREFIX"); ok {
+		return v
+	}
+	return defaultQueryPrefix
+}
+
 func embed(ctx context.Context, text, prefix string) ([]float64, error) {
 	if r := []rune(text); len(r) > maxInputChars() {
 		text = string(r[:maxInputChars()])
 	}
-	out, err := post(ctx, "/v1/embeddings", map[string]any{"input": prefix + text})
+	body := map[string]any{"input": prefix + text}
+	if m := embeddingsModel(); m != "" {
+		body["model"] = m
+	}
+	out, err := post(ctx, "/v1/embeddings", body)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +227,7 @@ type StoreParams struct {
 func QdrantStore() MCPTool[StoreParams, Raw] {
 	return MCPTool[StoreParams, Raw]{
 		Name:        "qdrant_store",
-		Description: "Embed text with the cluster's llama.cpp server and store it in Qdrant. Long text is split into several points; nothing is dropped.",
+		Description: "Embed text with the configured embeddings server and store it in Qdrant. Long text is split into several points; nothing is dropped.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, p *mcp.CallToolParamsFor[StoreParams]) (*mcp.CallToolResultFor[Raw], error) {
 			parts := chunk(p.Arguments.Information)
 
@@ -214,7 +239,7 @@ func QdrantStore() MCPTool[StoreParams, Raw] {
 			points := make([]map[string]any, 0, len(parts))
 			dims := 0
 			for i, part := range parts {
-				vec, err := embed(ctx, part, "search_document: ")
+				vec, err := embed(ctx, part, documentPrefix())
 				if err != nil {
 					return nil, fmt.Errorf("chunk %d/%d: %w", i+1, len(parts), err)
 				}
@@ -266,7 +291,7 @@ func QdrantFind() MCPTool[FindParams, Raw] {
 			if limit <= 0 {
 				limit = 5
 			}
-			vec, err := embed(ctx, p.Arguments.Query, "search_query: ")
+			vec, err := embed(ctx, p.Arguments.Query, queryPrefix())
 			if err != nil {
 				return nil, err
 			}

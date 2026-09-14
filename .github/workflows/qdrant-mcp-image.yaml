@@ -1,18 +1,18 @@
-# Builds mcp/llama-bridge and pushes it to GHCR. Separate from flux-push.yaml:
+# Builds mcp/qdrant-mcp and pushes it to GHCR. Separate from flux-push.yaml:
 # that publishes ./releases on every v* tag, this moves only when the server
 # source does.
-name: Build llama-bridge image
+name: Build qdrant-mcp image
 
 on:
   push:
     branches: [main]
     paths:
-      - 'mcp/llama-bridge/**'
-      - '.github/workflows/llama-bridge-image.yaml'
+      - 'mcp/qdrant-mcp/**'
+      - '.github/workflows/qdrant-mcp-image.yaml'
   workflow_dispatch:
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}/llama-bridge
+  IMAGE: ghcr.io/${{ github.repository }}/qdrant-mcp
 
 jobs:
   build:
@@ -42,19 +42,19 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: mcp/llama-bridge
+          context: mcp/qdrant-mcp
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.IMAGE }}:0.2.2
+            ${{ env.IMAGE }}:0.3.0
             ${{ env.IMAGE }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Summary
         run: |
-          echo "### llama-bridge image pushed" >> $GITHUB_STEP_SUMMARY
+          echo "### qdrant-mcp image pushed" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "${{ env.IMAGE }}:0.2.2" >> $GITHUB_STEP_SUMMARY
+          echo "${{ env.IMAGE }}:0.3.0" >> $GITHUB_STEP_SUMMARY
           echo "digest: ${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
