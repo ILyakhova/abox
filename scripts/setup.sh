@@ -62,6 +62,11 @@ EOF
 log "Checking Docker egress..."
 bash "${SCRIPT_DIR}/fix-egress.sh"
 
+# Clear the default ACL Codespaces leaves on Docker's data-root before the nodes
+# unpack any layer under it. See scripts/fix-docker-acl.sh.
+log "Checking Docker layer permissions..."
+bash "${SCRIPT_DIR}/fix-docker-acl.sh"
+
 # Initialize Tofu
 log "Running tofu init..."
 cd bootstrap
@@ -76,6 +81,8 @@ log "tofu apply done"
 # kind nodes, so confirm the nodes can actually reach a registry.
 bash "${SCRIPT_DIR}/fix-egress.sh" verify abox \
   || log "WARNING: nodes cannot reach a registry, Flux will not reconcile"
+bash "${SCRIPT_DIR}/fix-docker-acl.sh" verify abox \
+  || log "WARNING: non-root images will fail at exec on this cluster"
 
 export KUBECONFIG=~/.kube/config
 
