@@ -7,7 +7,11 @@ spec:
   type: Declarative
   description: Ingests and retrieves data across a vector store and a graph.
   declarative:
-    modelConfig: gemini-gemini-2-5-flash
+    # The ModelConfig the kagent chart creates, which every other agent here
+    # uses. It was gemini-gemini-2-5-flash, but that object was never shipped
+    # in releases/ -- it was created by hand and did not survive the cluster
+    # being rebuilt, leaving the agent stuck on ReconcileFailed.
+    modelConfig: default-model-config
     stream: true
     systemMessage: |
       You are a data agent over two stores in this cluster. Which products
