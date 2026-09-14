@@ -86,7 +86,7 @@ func qdrant(ctx context.Context, method, path string, body any, out any) (int, e
 // server: 13 over. 7000 is ~1750 tokens of prose and still fits at 3.4
 // chars/token.
 //
-// Capping loses the tail, so qdrant_store splits instead and keeps every
+// Capping loses the tail, so vector_store splits instead and keeps every
 // piece. This is the per-embed ceiling, and the chunk size.
 const defaultMaxInputChars = 7000
 
@@ -215,8 +215,8 @@ func uuid() (string, error) {
 }
 
 func init() {
-	registerTool(QdrantStore())
-	registerTool(QdrantFind())
+	registerTool(VectorStore())
+	registerTool(VectorFind())
 }
 
 type StoreParams struct {
@@ -224,9 +224,9 @@ type StoreParams struct {
 	Metadata    map[string]string `json:"metadata,omitempty" description:"Arbitrary key/value pairs stored with the text."`
 }
 
-func QdrantStore() MCPTool[StoreParams, Raw] {
+func VectorStore() MCPTool[StoreParams, Raw] {
 	return MCPTool[StoreParams, Raw]{
-		Name:        "qdrant_store",
+		Name:        "vector_store",
 		Description: "Embed text with the configured embeddings server and store it in Qdrant. Long text is split into several points; nothing is dropped.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, p *mcp.CallToolParamsFor[StoreParams]) (*mcp.CallToolResultFor[Raw], error) {
 			parts := chunk(p.Arguments.Information)
@@ -282,10 +282,10 @@ type FindParams struct {
 	Limit int    `json:"limit,omitempty" description:"Maximum results. Defaults to 5."`
 }
 
-func QdrantFind() MCPTool[FindParams, Raw] {
+func VectorFind() MCPTool[FindParams, Raw] {
 	return MCPTool[FindParams, Raw]{
-		Name:        "qdrant_find",
-		Description: "Semantic search over what qdrant_store has remembered.",
+		Name:        "vector_find",
+		Description: "Semantic search over what vector_store has remembered.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, p *mcp.CallToolParamsFor[FindParams]) (*mcp.CallToolResultFor[Raw], error) {
 			limit := p.Arguments.Limit
 			if limit <= 0 {

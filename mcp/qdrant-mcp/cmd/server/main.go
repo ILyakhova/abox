@@ -30,7 +30,7 @@ func run() error {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "qdrant-mcp",
 		Title:   "Qdrant MCP with pluggable embeddings",
-		Version: "0.3.0",
+		Version: "0.4.0",
 	}, nil)
 
 	// Register tools

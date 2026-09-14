@@ -14,22 +14,21 @@ the cluster serves.
 
 | tool | what it does |
 |---|---|
-| `qdrant_store` | embed text and upsert it into the collection, with metadata |
-| `qdrant_find` | embed a query and return the nearest points |
-| `llama_embed` | `/v1/embeddings` directly, no Qdrant involved |
-| `llama_health` | upstream readiness |
-| `llama_props` | llama.cpp `/props` |
-| `llama_models` | `/v1/models` |
-| `llama_tokenize` | llama.cpp `/tokenize` |
-| `llama_chat` | `/v1/chat/completions` |
+| `vector_store` | embed text and upsert it into the collection, with metadata |
+| `vector_find` | embed a query and return the nearest points |
+| `embed` | `/v1/embeddings` directly, nothing stored |
+| `embed_health` | upstream readiness |
+| `embed_models` | `/v1/models` |
+| `chat` | `/v1/chat/completions` |
+| `llamacpp_props` | llama.cpp `/props` |
+| `llamacpp_tokenize` | llama.cpp `/tokenize` |
 
-The `llama_*` names are historical. `llama_embed`, `llama_health`, `llama_models`
-and `llama_chat` are plain OpenAI-compatible calls and work against any such
-server; `llama_props` and `llama_tokenize` are llama.cpp's own endpoints and
-error elsewhere. `llama_chat` returns 501 whenever the configured endpoint was
-started with `--embeddings`, which has no generation head.
+Only the two `llamacpp_` tools are tied to a particular server; everything else
+is a plain OpenAI-compatible call and works against any of them. `chat` returns
+501 whenever the configured endpoint was started with `--embeddings`, which has
+no generation head.
 
-`qdrant_store` applies nomic's `search_document:` prefix and `qdrant_find` the
+`vector_store` applies nomic's `search_document:` prefix and `vector_find` the
 `search_query:` one, chunks input longer than `EMBEDDING_MAX_INPUT_CHARS`, and
 creates the collection on first write sized from the vector the server actually
 returned.

@@ -40,16 +40,16 @@ spec:
     # Ours; scaffolded with `kmcp init go`, source in mcp/qdrant-mcp. Replaces
     # mcp-server-qdrant, which could only embed in-process with fastembed and
     # was OOMKilled doing it.
-    image: ghcr.io/den-vasyliev/abox/qdrant-mcp:0.3.0
+    image: ghcr.io/den-vasyliev/abox/qdrant-mcp:0.4.0
     cmd: /app/server
     env:
       # Any OpenAI-compatible /v1/embeddings route. This one is the standalone
-      # llama.cpp Deployment, started with --embeddings, so llama_chat gets a
+      # llama.cpp Deployment, started with --embeddings, so chat gets a
       # 501 until a generative server is pointed at. Swap in llm-d with
       # http://llm-d-embedding.llm-d:8000 plus EMBEDDINGS_MODEL, or a managed
       # endpoint plus EMBEDDINGS_API_KEY -- see mcp/qdrant-mcp/README.md.
       EMBEDDINGS_BASE_URL: http://llama-cpp-embeddings.llama-cpp:8090
-      # qdrant_store / qdrant_find embed through the same endpoint, so the
+      # vector_store / vector_find embed through the same endpoint, so the
       # agent's memory lands in the vector space the gateway serves. The
       # collection is named for the model, not the runtime: dimensions differ
       # between models and the same model under a different runtime still moves

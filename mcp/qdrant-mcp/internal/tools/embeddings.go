@@ -19,7 +19,7 @@ type Empty struct{}
 
 // Raw is the shape every tool returns: the upstream JSON, untouched.
 type Raw struct {
-	Body string `json:"body" description:"Raw JSON response from the llama.cpp server."`
+	Body string `json:"body" description:"Raw JSON response from the upstream server."`
 }
 
 func text(s string) *mcp.CallToolResultFor[Raw] {
@@ -30,7 +30,7 @@ func text(s string) *mcp.CallToolResultFor[Raw] {
 
 func Health() MCPTool[Empty, Raw] {
 	return MCPTool[Empty, Raw]{
-		Name:        "llama_health",
+		Name:        "embed_health",
 		Description: "Check whether the embeddings server is up and has finished loading its model.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, _ *mcp.CallToolParamsFor[Empty]) (*mcp.CallToolResultFor[Raw], error) {
 			out, err := get(ctx, "/health")
@@ -44,7 +44,7 @@ func Health() MCPTool[Empty, Raw] {
 
 func Props() MCPTool[Empty, Raw] {
 	return MCPTool[Empty, Raw]{
-		Name:        "llama_props",
+		Name:        "llamacpp_props",
 		Description: "Report the server's build, context size, slot count and the flags it was started with.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, _ *mcp.CallToolParamsFor[Empty]) (*mcp.CallToolResultFor[Raw], error) {
 			out, err := get(ctx, "/props")
@@ -58,7 +58,7 @@ func Props() MCPTool[Empty, Raw] {
 
 func Models() MCPTool[Empty, Raw] {
 	return MCPTool[Empty, Raw]{
-		Name:        "llama_models",
+		Name:        "embed_models",
 		Description: "List the models the configured server has loaded.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, _ *mcp.CallToolParamsFor[Empty]) (*mcp.CallToolResultFor[Raw], error) {
 			out, err := get(ctx, "/v1/models")
@@ -77,7 +77,7 @@ type EmbedParams struct {
 
 func Embed() MCPTool[EmbedParams, Raw] {
 	return MCPTool[EmbedParams, Raw]{
-		Name:        "llama_embed",
+		Name:        "embed",
 		Description: "Embed text and return the vector. nomic-embed expects a 'search_document: ' or 'search_query: ' prefix on the input.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, p *mcp.CallToolParamsFor[EmbedParams]) (*mcp.CallToolResultFor[Raw], error) {
 			body := map[string]any{"input": p.Arguments.Input}
@@ -103,7 +103,7 @@ type TokenizeParams struct {
 
 func Tokenize() MCPTool[TokenizeParams, Raw] {
 	return MCPTool[TokenizeParams, Raw]{
-		Name:        "llama_tokenize",
+		Name:        "llamacpp_tokenize",
 		Description: "Tokenize text with the loaded model's tokenizer and return the token ids.",
 		Handler: func(ctx context.Context, _ *mcp.ServerSession, p *mcp.CallToolParamsFor[TokenizeParams]) (*mcp.CallToolResultFor[Raw], error) {
 			out, err := post(ctx, "/tokenize", map[string]any{"content": p.Arguments.Content})
@@ -124,7 +124,7 @@ type ChatParams struct {
 
 func Chat() MCPTool[ChatParams, Raw] {
 	return MCPTool[ChatParams, Raw]{
-		Name: "llama_chat",
+		Name: "chat",
 		// Fails with 501 against a server started with --embeddings, which is
 		// how both of abox's llama.cpp instances currently run.
 		Description: "Generate a chat completion. Requires a llama.cpp server serving a generative model.",
