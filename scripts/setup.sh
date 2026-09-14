@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG=/tmp/setup.log
+# Matches var.cluster_name in bootstrap/variables.tf.
+CLUSTER_NAME="${CLUSTER_NAME:-abox}"
 exec > >(tee -a "$LOG") 2>&1
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
@@ -73,15 +75,40 @@ cd bootstrap
 tofu init
 log "tofu init done"
 
+# A Codespace restart wipes Docker's data-root -- it lives under /tmp -- and
+# takes the kind cluster with it, while the OpenTofu state still describes one.
+# The three Kubernetes providers are configured from terraform_data.cluster.output,
+# so the first refresh dials an API server that is gone and the plan dies before
+# it can rebuild anything:
+#
+#   Error: Get "https://127.0.0.1:33713/api/v1/namespaces/flux-operator-bootstrap":
+#   dial tcp 127.0.0.1:33713: connect: connection refused
+#
+# If state names a cluster kind no longer has, the state is describing something
+# that does not exist. Drop it and let the apply build from nothing; there is
+# nothing to orphan.
+# command -v kind first: without it "kind get clusters" fails and every cluster
+# looks absent, which would prune the state of a perfectly healthy one.
+if command -v kind >/dev/null 2>&1 \
+   && tofu state list >/dev/null 2>&1 \
+   && tofu state list 2>/dev/null | grep -qx 'terraform_data.cluster' \
+   && ! kind get clusters 2>/dev/null | grep -qxF "${CLUSTER_NAME}"; then
+  log "state describes cluster '${CLUSTER_NAME}', kind has no such cluster -- pruning stale state"
+  for addr in $(tofu state list 2>/dev/null); do
+    tofu state rm "${addr}" >/dev/null 2>&1 || log "could not remove ${addr} from state"
+  done
+  log "stale state pruned"
+fi
+
 log "Running tofu apply..."
 tofu apply -auto-approve
 log "tofu apply done"
 
 # The bootstrap Job and every Flux-managed image are pulled by kubelet on the
 # kind nodes, so confirm the nodes can actually reach a registry.
-bash "${SCRIPT_DIR}/fix-egress.sh" verify abox \
+bash "${SCRIPT_DIR}/fix-egress.sh" verify "${CLUSTER_NAME}" \
   || log "WARNING: nodes cannot reach a registry, Flux will not reconcile"
-bash "${SCRIPT_DIR}/fix-docker-acl.sh" verify abox \
+bash "${SCRIPT_DIR}/fix-docker-acl.sh" verify "${CLUSTER_NAME}" \
   || log "WARNING: non-root images will fail at exec on this cluster"
 
 export KUBECONFIG=~/.kube/config
