@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-13
 - **Deciders:** abox maintainers
-- **Related:** [ADR-0002](./0002-embedding-runtime-in-cluster.md), [ToDo: local runtime](../todo/embeddings-local-llama-cpp.md)
+- **Related:** [ADR-0002](./0002-embedding-runtime-in-cluster.md), [ToDo: local runtime](../todo/embeddings-local-llama-cpp.md), [context vs concurrency](../embeddings-context-and-concurrency.md)
 
 ## Context
 
@@ -73,6 +73,13 @@ layout in the local runtime ToDo.
 
 **First-class GGUF.** `nomic-ai/nomic-embed-text-v1.5-GGUF` publishes 15 quantizations
 (Q2_K at 48 MiB through F32 at 262 MiB). No conversion step enters our pipeline.
+
+**Independently corroborated.** A separate deployment reached this repository later, solving
+the same problem against the same constraints, and had settled on the same model at the same
+quantization — confirmed from its server metadata rather than its labels. That is not proof
+the choice is right for any given corpus, and the benchmark rule below still stands, but it
+does say the reasoning above is not idiosyncratic. The two differ in tuning, which is
+compared in [context vs concurrency](../embeddings-context-and-concurrency.md).
 
 **OpenAI wire format.** Served by `llama-server`, the endpoint is a drop-in for
 `text-embedding-3-small`. Moving a project from the hosted API to the local model is a

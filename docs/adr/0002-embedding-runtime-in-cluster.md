@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-09-13
 - **Deciders:** abox maintainers
-- **Related:** [ADR-0001](./0001-text-embedding-model.md), [ToDo: cluster runtime](../todo/embeddings-cluster-sidecar-llmd.md)
+- **Related:** [ADR-0001](./0001-text-embedding-model.md), [ToDo: cluster runtime](../todo/embeddings-cluster-sidecar-llmd.md), [context vs concurrency](../embeddings-context-and-concurrency.md)
 
 ## Context
 
