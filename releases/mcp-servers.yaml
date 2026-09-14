@@ -43,26 +43,31 @@ spec:
     image: ghcr.io/den-vasyliev/abox/qdrant-mcp:0.4.0
     cmd: /app/server
     env:
-      # Any OpenAI-compatible /v1/embeddings route. This is llm-d's decode
-      # Service, hit directly rather than through the EPP -- the scorers are
-      # built for generation traffic, not a pooling runner's single-shot embed.
-      # Direct means no model-based routing, so EMBEDDINGS_MODEL stays unset:
-      # llama.cpp ignores it and serves the one GGUF it was given. The
-      # standalone Deployment is the other route,
-      # http://llama-cpp-embeddings.llama-cpp:8090, and chat gets a 501 against
-      # either -- both are started with --embeddings and have no generation
-      # head. A managed endpoint needs EMBEDDINGS_MODEL and EMBEDDINGS_API_KEY;
-      # see mcp/qdrant-mcp/README.md.
-      EMBEDDINGS_BASE_URL: http://llm-d-embedding.llm-d:8000
+      # Any OpenAI-compatible /v1/embeddings route. The standalone llama.cpp
+      # Deployment, serving nomic-embed-text-v1.5 as f16 at 8 slots x 2048 ctx.
+      # This is the starting point of the migration exercise; the other route is
+      # llm-d's decode Service:
+      #
+      #   http://llm-d-embedding.llm-d:8000
+      #
+      # hit directly rather than through the EPP, whose scorers are built for
+      # generation traffic, not a pooling runner's single-shot embed. Direct
+      # means no model-based routing, so EMBEDDINGS_MODEL stays unset there too:
+      # llama.cpp ignores it and serves the one GGUF it was given. A managed
+      # endpoint would need EMBEDDINGS_MODEL and EMBEDDINGS_API_KEY -- see
+      # mcp/qdrant-mcp/README.md, "Switching the embeddings backend".
+      #
+      # chat returns 501 against either: both are started with --embeddings and
+      # have no generation head.
+      EMBEDDINGS_BASE_URL: http://llama-cpp-embeddings.llama-cpp:8090
       # vector_store / vector_find embed through the same endpoint, so the
       # agent's memory lands in the vector space the gateway serves. The
-      # collection is named for that space, and the two routes are not the same
-      # space: llm-d serves the GGUF at Q8_0 -- 145MB for 136.7M params -- and
-      # the standalone Deployment at f16. Same model, same 768 dims, different
-      # kernels; close enough to look right and far enough to rank wrong. The
-      # f16 vectors stay in abox-nomic.
+      # collection is named for that space. llm-d serves the same model at Q8_0
+      # rather than f16 -- same 768 dims, different kernels -- so the two routes
+      # are two spaces and the vectors do not transfer. Repointing
+      # EMBEDDINGS_BASE_URL is therefore a re-embed, not a copy.
       QDRANT_URL: http://qdrant.qdrant:6333
-      QDRANT_COLLECTION: abox-nomic-q8
+      QDRANT_COLLECTION: abox-nomic
     resources:
       requests:
         cpu: 25m
