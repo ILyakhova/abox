@@ -8,7 +8,6 @@ resources:
   - kagent.yaml
   - llama-cpp-embeddings.yaml
   - llmd.yaml
-  - memgraph.yaml
   - mcp-servers.yaml
   - neo4j.yaml
   - phoenix.yaml
