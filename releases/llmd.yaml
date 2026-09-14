@@ -107,6 +107,10 @@ spec:
             - --port
             - "8000"
             - --embeddings
+            # Without this /metrics answers 501. Note the containerPort below
+            # is named "metrics" but is the serving port -- llama.cpp exposes
+            # its Prometheus counters on the same listener as the API.
+            - --metrics
             # 16384 over --parallel 8 is 2048 tokens per slot, nomic's full
             # window. --ubatch-size must be at least a slot because a pooled
             # embedding has to fit in one micro-batch, which makes it the real
