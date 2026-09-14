@@ -22,6 +22,18 @@ variable "oci_registry" {
   default     = "oci://ghcr.io/den-vasyliev/abox"
 }
 
+variable "releases_artifact" {
+  description = "OCI repository holding the releases artifact, under var.oci_registry"
+  type        = string
+  # main publishes to "releases". Every v* tag cut from a feature branch would
+  # land in that same stream -- the RSIP filter is ^\d+\.\d+\.\d+$ with
+  # limit 1, so the newest tag from any branch would win and a cluster
+  # bootstrapped from main would get this branch's bundle. feat/llmd-embeddings
+  # therefore has its own repository, matching the name
+  # .github/workflows/flux-push.yaml derives from the branch.
+  default = "releases-llmd-embeddings"
+}
+
 variable "releases_version" {
   description = "Default tag for releases OCI artifact bootstrap"
   type        = string
