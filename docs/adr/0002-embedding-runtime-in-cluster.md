@@ -14,9 +14,9 @@ Three shapes are on the table:
 
 1. **Shared Service** — one Deployment, one ClusterIP, many consumers.
 2. **Sidecar** — the embedder runs as an extra container inside each consumer's pod.
-3. **llm-d** — the Kubernetes-native distributed inference stack (vLLM + Inference Gateway
-   + Endpoint Picker), which abox is unusually well-positioned for because agentgateway is
-   already the gateway.
+3. **llm-d** — the Kubernetes-native distributed inference stack (Inference Gateway +
+   Endpoint Picker over a model service, most often vLLM but not necessarily), which abox is
+   unusually well-positioned for because agentgateway is already the gateway.
 
 These are not mutually exclusive, and the decision below assigns each a scope rather than
 picking one winner.
@@ -72,45 +72,63 @@ The architectural fit is real, and worth stating plainly because it is the reaso
   kgateway 2.2 removed the inference path that did *not* go through agentgateway, so
   agentgateway is the intended data plane for exactly this.
 
-In other words, **the gateway half of llm-d is already installed.** What blocks it is the
-workload and the hardware, not the integration:
+In other words, **the gateway half of llm-d is already installed.** What makes it not worth
+adding for this workload is the value it would return, not any barrier to running it:
 
-**Workload mismatch.** llm-d's value is KV-cache-aware routing, tiered prefix caching, and
-prefill/decode disaggregation. An embedding model is a **single-pass encoder: no KV cache,
-no decode phase, no prefix to reuse across requests.** Every headline llm-d optimisation is
-inapplicable to this workload. llm-d v0.9's documented scope is decoder-based transformer
-LLMs; embedding and pooling models are not one of its well-lit paths.
+**The optimisations do not apply.** llm-d's value is KV-cache-aware routing, tiered prefix
+caching, and prefill/decode disaggregation. An embedding model is a **single-pass encoder:
+no KV cache, no decode phase, no prefix to reuse across requests.** Every headline llm-d
+optimisation is inapplicable here. What remains is replica scheduling through the Endpoint
+Picker — real, but only once there is more than one replica to schedule between.
 
-**Hardware mismatch.** llm-d targets accelerators — NVIDIA, AMD, TPU. abox is CPU-only
-KinD. Running vLLM on CPU under llm-d to serve a 137M-parameter encoder is strictly worse
-on every axis than a 140 MiB `llama-server` process.
+**Operational weight.** InferencePool, the Endpoint Picker, the model service and the
+Inference Extension CRDs are a large surface next to a single `llama-server` process, in a
+sandbox whose premise is `make run` finishing on a laptop.
 
-**Operational weight.** InferencePool, the Endpoint Picker, the Router, vLLM model servers
-and the Inference Extension CRDs are a large surface to add to a sandbox whose entire
-premise is `make run` finishing on a laptop.
+### Correction, 2026-09-14
+
+This section previously gave two further reasons, and observation has since falsified both.
+They are recorded rather than deleted, because a decision that rests on a wrong premise
+should not be allowed to look well-founded in hindsight.
+
+| Claimed | Observed |
+|---|---|
+| "embedding and pooling models are not one of its well-lit paths" | an `llm-d-embedding` model service runs in this very cluster |
+| "llm-d targets accelerators — NVIDIA, AMD, TPU" | it runs on a 2-core CPU KinD node |
+| implied throughout: llm-d means vLLM | its model service here fronts **llama.cpp**, serving `model.gguf`; `/props` answers, which vLLM does not expose |
+
+The observed deployment serves the same `nomic-embed-text-v1.5` at `Q8_0` as the plain
+Deployment beside it, at the same 2048 × 8 slots, behind an `InferencePool` and an EPP
+started with `--pool-group inference.networking.k8s.io`.
+
+So llm-d is not vLLM-only, does not require an accelerator, and does serve encoders. The
+decision above stands, but on the narrower ground that it buys nothing for this workload —
+not on the false ground that it could not be done.
 
 ## Adoption triggers for llm-d
 
-Adopt when any of these holds — the second is the realistic one:
+Adopt when any of these holds — the first is the realistic one:
 
-1. A GPU node is available to the cluster.
-2. **A generative model is added to abox.** This is the natural trigger: llm-d serves
-   chat/completions where its caching and disaggregation actually pay off, while
-   `llama-server` keeps serving embeddings, both behind the one agentgateway. The two
-   runtimes coexist; the seam between them is the OpenAI wire format.
+1. **A generative model is added to abox.** The natural trigger: llm-d's caching and
+   disaggregation only pay off where there is a decode phase to optimise.
+2. **The embedder needs more than one replica.** This is what the Endpoint Picker actually
+   buys an encoder. One replica behind a scheduler is a scheduler with nothing to decide.
 3. More than one model needs per-model routing, prioritisation, or token-based rate
    limiting — agentgateway can apply those policies against an InferencePool backend.
-4. vLLM pooling/embedding models become a supported llm-d well-lit path, which would make
-   trigger 2 collapse into a single runtime.
+
+A GPU node used to be listed here. It is not a trigger: the deployment observed on
+2026-09-14 runs on CPU. It would raise the payoff of trigger 1, nothing more.
 
 The migration path is already sketched in the cluster ToDo so that adoption is a
 substitution behind a stable URL rather than a redesign.
 
 ## Consequences
 
-- We accept **two inference runtimes** in the eventual steady state (llama.cpp for
-  encoders, vLLM/llm-d for decoders). This is a deliberate trade: a single runtime would
-  mean running vLLM on CPU today, which costs more than the inconsistency does.
+- Adopting llm-d later does **not** force a second inference engine. Its model service can
+  front `llama-server` on a GGUF — that is what the deployment observed on 2026-09-14 does —
+  so llm-d is a scheduling and routing layer that can be added above the runtime already
+  chosen here, rather than a replacement for it. The earlier version of this ADR assumed
+  llm-d implied vLLM and treated the split as an accepted cost; there is no such cost.
 - Consumers must address the embedder by **Service DNS or gateway URL**, never by pod IP,
   so that replacing the backing implementation with an InferencePool later is invisible to
   them.

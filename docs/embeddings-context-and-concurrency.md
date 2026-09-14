@@ -52,6 +52,12 @@ A favours throughput, B favours document length. Neither is wrong; they answer d
 questions. What makes the comparison worth writing down is that the axis is invisible unless
 you go looking — A's configuration is internally consistent and logs no warning at all.
 
+A third deployment in the same cluster, `llm-d-embedding`, serves the identical model under
+an `InferencePool` and reports `n_ctx` 2048 across 8 slots — the same settings as A, arrived
+at separately. Two of three landed on 2048 without choosing it, which is the point: leave
+`--rope-freq-scale` unset and the model's base context is what you get, whatever `--ctx-size`
+says.
+
 ## How they are wired
 
 ```mermaid

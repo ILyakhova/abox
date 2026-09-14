@@ -247,7 +247,10 @@ spec:
 
 Do **not** implement this now. ADR-0002 records why: an embedding model is a single-pass
 encoder with no KV cache and no decode phase, so every llm-d optimisation is inapplicable,
-and llm-d expects accelerators that KinD does not have.
+and what remains — replica scheduling — is worth nothing at one replica.
+
+This is about payoff, not feasibility. llm-d runs an encoder on CPU perfectly well; see the
+correction in ADR-0002.
 
 Execute this part only when an [adoption trigger](../adr/0002-embedding-runtime-in-cluster.md#adoption-triggers-for-llm-d)
 fires — realistically, when a **generative** model is added to abox.

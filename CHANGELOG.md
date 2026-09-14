@@ -38,8 +38,14 @@ Releases are the `v*` tags that CI publishes as OCI artifacts to
   agentgateway has first-class Gateway API Inference Extension support, and kgateway 2.2
   removed the inference path that did not go through agentgateway — but an embedding model
   is a single-pass encoder with no KV cache and no decode phase, so KV-cache-aware routing
-  and prefill/decode disaggregation buy nothing, and llm-d targets accelerators that KinD
-  does not have. The realistic trigger is adding a *generative* model to abox.
+  and prefill/decode disaggregation buy nothing. What remains is replica scheduling, which
+  is worth nothing at one replica. The realistic trigger is adding a *generative* model.
+
+  The ADR originally gave two further reasons — that llm-d does not serve embedding models,
+  and that it requires accelerators — and a correction dated 2026-09-14 records that both
+  are false, along with a third assumption that llm-d implies vLLM. An `llm-d-embedding`
+  model service was observed running on a CPU KinD node, fronting `llama-server` on a GGUF.
+  The decision is unchanged; its justification is now the narrower and correct one.
 
 - **ToDo — run the model locally with llama.cpp**
   ([docs/todo/embeddings-local-llama-cpp.md](docs/todo/embeddings-local-llama-cpp.md)).
