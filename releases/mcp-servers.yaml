@@ -43,19 +43,26 @@ spec:
     image: ghcr.io/den-vasyliev/abox/qdrant-mcp:0.4.0
     cmd: /app/server
     env:
-      # Any OpenAI-compatible /v1/embeddings route. This one is the standalone
-      # llama.cpp Deployment, started with --embeddings, so chat gets a
-      # 501 until a generative server is pointed at. Swap in llm-d with
-      # http://llm-d-embedding.llm-d:8000 plus EMBEDDINGS_MODEL, or a managed
-      # endpoint plus EMBEDDINGS_API_KEY -- see mcp/qdrant-mcp/README.md.
-      EMBEDDINGS_BASE_URL: http://llama-cpp-embeddings.llama-cpp:8090
+      # Any OpenAI-compatible /v1/embeddings route. This is llm-d's decode
+      # Service, hit directly rather than through the EPP -- the scorers are
+      # built for generation traffic, not a pooling runner's single-shot embed.
+      # Direct means no model-based routing, so EMBEDDINGS_MODEL stays unset:
+      # llama.cpp ignores it and serves the one GGUF it was given. The
+      # standalone Deployment is the other route,
+      # http://llama-cpp-embeddings.llama-cpp:8090, and chat gets a 501 against
+      # either -- both are started with --embeddings and have no generation
+      # head. A managed endpoint needs EMBEDDINGS_MODEL and EMBEDDINGS_API_KEY;
+      # see mcp/qdrant-mcp/README.md.
+      EMBEDDINGS_BASE_URL: http://llm-d-embedding.llm-d:8000
       # vector_store / vector_find embed through the same endpoint, so the
       # agent's memory lands in the vector space the gateway serves. The
-      # collection is named for the model, not the runtime: dimensions differ
-      # between models and the same model under a different runtime still moves
-      # the vectors, so repointing EMBEDDINGS_BASE_URL means a new collection.
+      # collection is named for that space, and the two routes are not the same
+      # space: llm-d serves the GGUF at Q8_0 -- 145MB for 136.7M params -- and
+      # the standalone Deployment at f16. Same model, same 768 dims, different
+      # kernels; close enough to look right and far enough to rank wrong. The
+      # f16 vectors stay in abox-nomic.
       QDRANT_URL: http://qdrant.qdrant:6333
-      QDRANT_COLLECTION: abox-nomic
+      QDRANT_COLLECTION: abox-nomic-q8
     resources:
       requests:
         cpu: 25m
