@@ -61,6 +61,12 @@ spec:
     memgraphConfig:
       - "--data-directory=/var/lib/memgraph/mg_data"
       - "--also-log-to-stderr=true"
+      # Memgraph holds the graph in RAM. The flag is MiB and defaults to 0,
+      # which means 90-100% of *physical* memory -- the node's, not the
+      # cgroup's, so in a container it aims past the pod limit and the kubelet
+      # OOMKills it. Set below the limit below so Memgraph raises a query
+      # exception first.
+      - "--memory-limit=1536"
 
     resources:
       requests:
