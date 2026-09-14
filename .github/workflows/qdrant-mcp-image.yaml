@@ -5,7 +5,9 @@ name: Build qdrant-mcp image
 
 on:
   push:
-    branches: [main]
+    # This branch ships by v* tag and is never merged, so main would never
+    # build its image.
+    branches: [main, feat/llmd-embeddings]
     paths:
       - 'mcp/qdrant-mcp/**'
       - '.github/workflows/qdrant-mcp-image.yaml'
