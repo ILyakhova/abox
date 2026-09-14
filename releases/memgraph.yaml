@@ -1,0 +1,71 @@
+# Memgraph, the alternative graph backend to releases/neo4j.yaml. Both speak
+# Bolt and Cypher, so a client only changes its URL -- but the procedures do
+# not overlap: Memgraph has no APOC, and neo4j/mcp's get-schema calls
+# apoc.meta.schema. Use memgraph-mcp (releases/mcp-servers.yaml) against this
+# one, which reads SHOW SCHEMA INFO instead.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: memgraph
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: memgraph
+  namespace: flux-system
+spec:
+  interval: 1h
+  # An HTTP Helm repo, like neo4j and qdrant -- chart.spec + HelmRepository,
+  # not chartRef.
+  url: https://memgraph.github.io/helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: memgraph
+  namespace: memgraph
+spec:
+  interval: 1h
+  releaseName: memgraph
+  chart:
+    spec:
+      chart: memgraph
+      version: "1.0.6"
+      sourceRef:
+        kind: HelmRepository
+        name: memgraph
+        namespace: flux-system
+  install:
+    createNamespace: true
+  values:
+    service:
+      # ClusterIP is the chart default and what in-cluster clients use:
+      #
+      #   bolt://memgraph.memgraph:7687
+      #
+      # The chart can add a second LoadBalancer Service; KinD has one LB
+      # address and agentgateway already holds it, so that is left off.
+      type: ClusterIP
+      enableBolt: true
+      boltPort: 7687
+
+    persistentVolumeClaim:
+      # storageClassName empty means the default StorageClass, which on KinD is
+      # the local-path provisioner.
+      createStorageClaim: true
+      storageSize: 5Gi
+      # Logs go to stderr, which --also-log-to-stderr already guarantees, so a
+      # second PVC buys nothing here.
+      createLogStorage: false
+
+    memgraphConfig:
+      - "--data-directory=/var/lib/memgraph/mg_data"
+      - "--also-log-to-stderr=true"
+
+    resources:
+      requests:
+        cpu: "250m"
+        memory: "512Mi"
+      limits:
+        cpu: "1"
+        memory: "2Gi"

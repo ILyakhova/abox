@@ -1,5 +1,9 @@
 # MCP servers run by kagent's kmcp controller. kmcp creates a Service named
-# after the MCPServer and adapts stdio servers to streamable HTTP.
+# after the MCPServer and, for stdio servers, fronts them with an agentgateway
+# proxy on 3000; an http server is reached directly on its own port.
+#
+# neo4j-mcp and memgraph-mcp are alternatives to each other, one per graph
+# backend. Both are installed; the graph-rag-agent references neo4j-mcp.
 ---
 apiVersion: kagent.dev/v1alpha1
 kind: MCPServer
@@ -60,6 +64,42 @@ spec:
       requests:
         cpu: 25m
         memory: 32Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+---
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: memgraph-mcp
+  namespace: kagent
+spec:
+  # Python/FastMCP, so http rather than stdio: FastMCP's stdio loop returns on
+  # stdin EOF and the container would exit on every session teardown. FastMCP
+  # mounts at /mcp/ and 307s /mcp, so the trailing slash matters.
+  transportType: http
+  httpTransport:
+    targetPort: 8000
+    path: /mcp/
+  deployment:
+    image: memgraph/mcp-memgraph:0.4.0
+    port: 8000
+    env:
+      MEMGRAPH_URL: bolt://memgraph.memgraph:7687
+      MEMGRAPH_DATABASE: memgraph
+      # "memgraph-experimental" is the other option.
+      MCP_SERVER: server
+      # The image sets both already; repeated here because the transport is the
+      # whole reason this one is not stdio.
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      # Defaults to true, which blocks CREATE/MERGE/DELETE/SET/DROP/REMOVE and
+      # so blocks ingest.
+      MCP_READ_ONLY: "false"
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
       limits:
         cpu: 500m
         memory: 256Mi
