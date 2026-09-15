@@ -26,6 +26,24 @@ Gemini** while reporting the result as nomic against MiniLM. Nothing in the
 results table would have exposed that. The 401 is what forced the language
 model to become a controlled variable instead of an unexamined one.
 
+### What this does not measure
+
+Vectors only. Neither arm has the Neo4j tools the shipped `retrieval-agent`
+carries, and that is deliberate.
+
+A graph would answer several of the questions below for reasons that have
+nothing to do with embeddings. Give arm N a graph and it wins section C — but
+we would not know whether that came from the 2048-token window or simply from
+having a second store that does no semantic search at all. The variable under
+test has to be the embedder, so the graph comes out of both arms.
+
+The consequence is worth stating plainly, because it limits what the result can
+claim: this measures **vector retrieval quality when the embedding model
+changes**, not the quality of hybrid retrieval in abox. The shipped agent
+queries both stores and will behave better than arm N in normal use. Whether
+the graph earns its keep is a separate question, and this lab does not answer
+it.
+
 ## Corpus
 
 kagent's own custom resources in namespace `kagent`: every `Agent`,
@@ -49,19 +67,99 @@ Paste the same instruction into both chats:
 > one call per object: all Agents, all ModelConfigs, all MCPServers. Put name,
 > namespace and kind in the metadata. Do not summarise.
 
-Then confirm both collections actually received comparable content:
+Qdrant is a StatefulSet, and its image has no `curl`, so reach it by
+port-forward and use the client's own:
+
+```bash
+kubectl -n qdrant port-forward svc/qdrant 6333:6333 >/dev/null 2>&1 &
+sleep 3
+count() {
+  for c in abox-nomic abox-minilm; do
+    printf '%-14s ' "$c"
+    curl -s "http://localhost:6333/collections/$c" \
+      | grep -o '"points_count":[0-9]*' || echo "not found"
+  done
+}
+```
+
+### Empty both collections first
+
+Run `count` **before** ingesting. Neither server's store operation is
+idempotent — it appends, it does not replace — so ingesting over existing
+points leaves the old corpus mixed with the new one.
+
+On the first run this mattered: the collections held 20 and 14 points from
+earlier sessions. Ingesting on top would have produced 20+N against 14+N, and
+the evaluation would have compared two different corpora while reporting it as
+a comparison of two models.
 
 ```bash
 for c in abox-nomic abox-minilm; do
-  printf '%-14s ' "$c"
-  kubectl -n qdrant exec deploy/qdrant -- \
-    curl -s "http://localhost:6333/collections/$c" \
-    | grep -o '"points_count":[0-9]*'
+  curl -s -X DELETE "http://localhost:6333/collections/$c"; echo " <- $c"
 done
 ```
 
-**If the counts differ by more than one or two, stop and re-ingest.** A
-comparison across different corpora measures nothing.
+Delete both even when only one is dirty, so the two arms start from the same
+state. The servers recreate them on first write.
+
+Then ingest, then run `count` again.
+
+### Points are not documents — the servers chunk differently
+
+The first run came back 21 against 14 and looked like a broken ingest. It was
+not. `qdrant-mcp` **splits a document into chunks and stores one point per
+chunk**; its payload carries `chunk`, `chunks` and a shared `doc` id. The
+official server does not chunk at all — one `qdrant-store` call is one point.
+
+So `points_count` is not comparable between the arms. Count distinct documents
+on the nomic side instead:
+
+```bash
+curl -s -X POST "http://localhost:6333/collections/abox-nomic/points/scroll" \
+  -H 'Content-Type: application/json' \
+  -d '{"limit":100,"with_payload":["doc"],"with_vector":false}' \
+  | grep -o '"doc":"[^"]*"' | sort -u | wc -l
+```
+
+and confirm the two collections hold the same objects by name:
+
+```bash
+for c in abox-nomic abox-minilm; do
+  echo "== $c"
+  curl -s -X POST "http://localhost:6333/collections/$c/points/scroll" \
+    -H 'Content-Type: application/json' \
+    -d '{"limit":100,"with_payload":true,"with_vector":false}' \
+    | grep -o '"name":"[^"]*"' | sort -u
+done
+```
+
+On this run both returned the same 14 names. **If the name lists differ, stop
+and re-ingest.** A comparison across different corpora measures nothing.
+
+### What chunking does to the prediction
+
+This has to be recorded before the results, not after, because it changes what
+a section C failure would mean.
+
+ADR-0001 rejected all-MiniLM-L6-v2 on its 256-token context. The implicit
+assumption was that a long manifest is embedded as one vector and everything
+past the window is lost. That assumption holds for arm M — the official server
+hands the whole document to fastembed in one piece.
+
+It does not hold for arm N. `qdrant-mcp` chunks first, so no single embedding
+call ever sees more than a chunk, and the 2048-token context is not what saves
+it. **Chunking is.**
+
+The consequence is that these two arms differ in two ways, not one: the
+embedding model *and* whether the ingest path chunks. A section C loss for arm
+M therefore cannot be attributed to the model alone. The honest reading would
+be that the packaged pipeline built around nomic handles long documents and the
+packaged pipeline built around MiniLM does not — which is a real, useful finding
+about the two servers, but a weaker claim than "nomic is the better embedder".
+
+Separating the two would need a third arm: the official server with a chunking
+ingest, or `qdrant-mcp` pointed at a 256-token model. That is out of scope here
+and is named as further work rather than quietly ignored.
 
 ## Questions
 

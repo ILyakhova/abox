@@ -101,7 +101,11 @@ spec:
       mcpServer:
         apiGroup: kagent.dev
         kind: MCPServer
-        name: qdrant-mcp
+        # qdrant-mcp-fixed, not qdrant-mcp: the shipped image returns an empty
+        # structuredContent for every tool, so vector_find delivered nothing to
+        # the agent however well the search itself ranked. See
+        # lab4/qdrant-mcp-fixed.yaml.
+        name: qdrant-mcp-fixed
         toolNames:
         - vector_store
         - vector_find

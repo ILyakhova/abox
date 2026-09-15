@@ -22,9 +22,19 @@ type Raw struct {
 	Body string `json:"body" description:"Raw JSON response from the upstream server."`
 }
 
+// Every tool here declares an outputSchema with a required `body`, so a client
+// that honours the schema reads structuredContent and ignores Content entirely.
+// Setting only Content left structuredContent at the zero value of Raw --
+// {"body":""} -- and vector_find looked to the caller like a search that had
+// found nothing. The server returned 200, the payload was present in Content,
+// and nothing anywhere logged an error.
+//
+// Both halves are populated deliberately: Content for a client that renders
+// text, structuredContent for one that follows the schema.
 func text(s string) *mcp.CallToolResultFor[Raw] {
 	return &mcp.CallToolResultFor[Raw]{
-		Content: []mcp.Content{&mcp.TextContent{Text: s}},
+		Content:           []mcp.Content{&mcp.TextContent{Text: s}},
+		StructuredContent: Raw{Body: s},
 	}
 }
 

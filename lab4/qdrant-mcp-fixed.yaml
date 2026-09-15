@@ -1,0 +1,47 @@
+# LAB4 — qdrant-mcp with the structuredContent fix.
+#
+# Why a second object instead of patching the shipped one: qdrant-mcp carries
+# kustomize.toolkit.fluxcd.io/name=releases, so changing its image is reverted
+# within the Kustomization's interval. Same reason lab4 has its own agents.
+#
+# What it fixes. Every tool in this server declares an outputSchema with a
+# required `body`, but the handlers only ever set Content. structuredContent was
+# therefore serialised as the zero value of Raw -- {"body":""} -- and a client
+# that honours the declared schema, which kagent does, read an empty string.
+#
+# vector_find was the casualty. Asked "neo4j", the server ranked neo4j-mcp first
+# at score 0.62 and put the full payload in Content; the agent received
+# structuredContent.body = "" and answered "it is not in the collection". The
+# HTTP status was 200, the search was correct, and nothing logged an error.
+# Retrieval had been returning nothing to every agent since the tool was written.
+#
+# Built locally and side-loaded with `kind load docker-image`, so IfNotPresent is
+# required: Always would send the kubelet to GHCR for a tag that is not there.
+---
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: qdrant-mcp-fixed
+  namespace: kagent
+spec:
+  transportType: stdio
+  stdioTransport: {}
+  deployment:
+    image: docker.io/library/qdrant-mcp:lab4
+    imagePullPolicy: IfNotPresent
+    cmd: /app/server
+    env:
+      # Identical to the shipped server in every respect that affects retrieval:
+      # same embeddings endpoint, same collection, same prefixes, same chunking.
+      # The only difference is the fix above, so arm N measures nomic rather
+      # than a serialisation bug.
+      EMBEDDINGS_BASE_URL: http://llama-cpp-embeddings.llama-cpp:8090
+      QDRANT_URL: http://qdrant.qdrant:6333
+      QDRANT_COLLECTION: abox-nomic
+    resources:
+      requests:
+        cpu: 25m
+        memory: 32Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
