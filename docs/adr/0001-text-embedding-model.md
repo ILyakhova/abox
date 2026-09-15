@@ -148,8 +148,49 @@ Phoenix is already in the stack; it is where that benchmark should run and be st
 | **OpenAI `text-embedding-3-small`** (status quo) | Needs a key and egress, text leaves the machine, per-token cost, cannot run offline. Also the losing baseline in the Yustai benchmark. Retained as a comparison baseline, rejected as the default. |
 | **`BAAI/bge-m3`** | Genuinely multilingual (100+ languages including Ukrainian), 8192 context, multi-vector retrieval. But 568M parameters, ~2.2 GB at F16 — roughly 4× the memory and latency of nomic on CPU. **This is the designated escape hatch the moment the corpus is not English.** |
 | **`Qwen3-Embedding-0.6B / 4B / 8B`** | 8B won the Yustai benchmark decisively and supports Matryoshka. 8B is GPU territory; 0.6B is plausible on CPU. Strongest candidate to displace nomic once abox has a GPU path. |
-| **`all-MiniLM-L6-v2`** | 22M parameters and very fast, but a 256-token context and MTEB ~56 with no Matryoshka. Context is too short for document chunks. |
+| **`all-MiniLM-L6-v2`** | 22M parameters and very fast, but a 256-token context and MTEB ~56 with no Matryoshka. Rejected — see the correction below, which replaces the original reason ("context is too short for document chunks") with what measurement actually showed. |
 | **`nomic-embed-text-v2-moe`** | Multilingual MoE successor with better language coverage. 475M total parameters and MoE routing is less well-trodden in llama.cpp. Tracked as the likely next revision of this ADR. |
+
+## Correction, 2026-09-15 — the reason for rejecting `all-MiniLM-L6-v2` was wrong
+
+This ADR rejected `all-MiniLM-L6-v2` because "context is too short for document
+chunks", meaning that content past 256 tokens would be unreachable. LAB4 put
+that to a measurement — the same corpus and the same twelve questions through
+two agents differing in their embedding model — and **the stated mechanism does
+not hold**.
+
+Asked for a rule written at line ~70 of an ~80-line system prompt, the arm
+backed by all-MiniLM quoted it correctly. Truncation applies to the *embedding*
+only. Qdrant stores and returns the full text, so once a document is in the
+result set the language model reads all of it. The window degrades **ranking**,
+not reach; by the time a document has been retrieved the window has done all the
+harm it can do.
+
+**The rejection stands, on a different basis.** At equal `k`, the MiniLM arm
+needed two to three times as many searches to reach the same documents — three
+where the nomic arm took one, repeatedly — and on the one question whose answer
+spanned two objects it returned a single object and cited its own prompt rather
+than the collection. That is what a weaker embedding looks like in practice: not
+blindness, but a noisier ordering that an agent compensates for by searching
+again, at a cost in latency and tokens that nothing in the transcript labels as
+a retrieval problem.
+
+Three caveats, recorded so this is not read as more than it is:
+
+- The two arms differed in more than the model. One pipeline chunks documents
+  before embedding and the other does not, so the measurement cannot attribute
+  the gap to the embedder alone.
+- Twelve questions over fourteen documents is three orders of magnitude short of
+  what the standing benchmark rule in this ADR demands. This is a signal, not a
+  verdict, and the rule applies to abox's own work first.
+- The first run of the experiment produced the opposite result — the nomic arm
+  missing a control question the MiniLM arm hit — because `qdrant-mcp` returned
+  an empty `structuredContent` to every caller. Had the protocol lacked a
+  control question, this ADR would have been corrected in the wrong direction on
+  what looked like solid evidence. Fixed in
+  `mcp/qdrant-mcp/internal/tools/embeddings.go`.
+
+Protocol, transcripts and the full results table: [`lab4/evaluation.md`](../../lab4/evaluation.md).
 
 ## Re-evaluation triggers
 

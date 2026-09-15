@@ -156,6 +156,68 @@ A fork still needs the `oci_registry` override from the cluster runbook before `
 means anything: without it the cluster reconciles the upstream artifact and reports Ready
 while ignoring the fork's own releases entirely.
 
+### LAB4 — agentic retrieval across two embedding models
+
+Two agents over the same corpus, differing in their embedding model: the abox
+`qdrant-mcp` (nomic-embed-text-v1.5, 768 dims, chunked, out-of-process) against
+the official `mcp-server-qdrant` (all-MiniLM-L6-v2, 384 dims, in-process
+fastembed). Twelve questions in four sections — exact term, paraphrase, content
+deep inside long manifests, and negative controls. Protocol, transcripts and
+results: [lab4/evaluation.md](lab4/evaluation.md).
+
+Nothing in `lab4/` ships. This cluster reconciles the upstream OCI artifact, so
+the objects are applied by hand and the shipped manifests are untouched.
+
+**The result corrects ADR-0001 without changing its decision.** That ADR
+rejected all-MiniLM-L6-v2 because a 256-token context would put long documents
+out of reach. It does not: truncation applies to the embedding, Qdrant returns
+the full text, and the language model reads the rest. The MiniLM arm quoted a
+rule from line ~70 of an ~80-line prompt. What measurement did show is a
+consistent ranking cost — two to three times the searches to reach the same
+documents, and one question where it reached only half the answer. The
+rejection stands; the reason in the ADR has been replaced with the measured one.
+
+**Two findings that are not about embeddings at all, and matter more.**
+
+`vector_find` had never returned anything to any agent. Every tool in
+`qdrant-mcp` declares an `outputSchema` with a required `body` but populated
+only `Content`, leaving `structuredContent` at `{"body":""}`. kagent honours the
+declared schema and read an empty string. Asked "neo4j", the server ranked the
+right manifest first at score 0.62, put the payload in `Content`, returned HTTP
+200 — and the agent answered, accurately from where it sat, that the collection
+was empty. No error was logged anywhere. Fixed in
+`mcp/qdrant-mcp/internal/tools/embeddings.go`.
+
+This was caught only because the protocol opens with a control question whose
+answer both arms must find. On the first run the nomic arm missed it and the
+MiniLM arm hit it — the opposite of the prediction — and the protocol says a
+miss there means a broken setup rather than a weak model. Without that rule the
+remaining eleven questions would have run with one arm blind, and ADR-0001 would
+have been corrected in the wrong direction on the strength of a serialisation
+bug.
+
+The second: **a plaintext credential is in the corpus.** Both agents are
+instructed never to ingest `Secret`, and both obeyed. It made no difference —
+`neo4j-mcp` carries `NEO4J_MCP_PASSWORD: abox-neo4j` as a plain field in its
+spec, which is exactly the kind of object the corpus is built from, and a
+negative-control question surfaced it unprompted. Excluding kinds is not a
+control over credentials; scanning values is. `neo4j-mcp` should take its
+password from a Secret reference.
+
+A third, smaller: **the cluster cannot tell you why.** One question asked for a
+reason recorded in a YAML comment. Comments do not survive being applied, so no
+comment from any manifest has ever been in the collection. A RAG corpus built
+from live objects answers what is configured and never the rationale; indexing
+the manifests from git is a different corpus, not a tidier version of this one.
+
+Three defects in the experiment's own design were found and recorded rather than
+quietly fixed: the arms initially searched at different depths (`k` of 10 against
+5 over a 14-document corpus, which made ranking nearly irrelevant for one side);
+the shipped `retrieval-agent` is pinned to a ModelConfig with a placeholder key,
+which would have turned the comparison into GPT against Gemini had the key
+worked; and the two pipelines differ in chunking as well as in model, which the
+results cannot separate.
+
 ### Cost
 
 Recorded per day and cumulatively, for planning.
@@ -165,7 +227,8 @@ Recorded per day and cumulatively, for planning.
 | 2026-09-13 | Source material, ADR-0001 and ADR-0002, the runbooks, the local run that found the rope defect | 120,600 |
 | 2026-09-14 | Cluster deployment and verification, the egress blackhole, the upstream graph-RAG discovery, diagrams, correcting ADR-0002 | 127,400 |
 | 2026-09-15 | LAB4 — merging `feat/llmd-embeddings`, rebuild on Kubernetes 1.37, the official Qdrant MCP arm, the evaluation protocol | 88,000 |
-| | **Cumulative** | **~336,000** |
+| 2026-09-15 (evening) | Running LAB4: the `structuredContent` defect, the search-depth correction, twelve questions through two agents, ADR-0001 corrected | 68,000 |
+| | **Cumulative** | **~404,000** |
 
 Day one's figure breaks down as roughly 54,600 on reading the repository, 32,900 on source
 material (six page fetches and four searches), 27,500 on writing, and 5,600 on verification.
@@ -176,8 +239,12 @@ for faster vector search, the llm-d architecture proposal, the agentgateway infe
 docs, and a Ukrainian-language case study on embedding selection for a legal-domain RAG
 system — the source of the benchmark rule in ADR-0001.
 
-Day three is the cheapest of the three despite covering the most ground. Nothing was spent
-re-establishing where things live or what had already been decided.
+Day three's first session is the cheapest of the four despite covering the most ground:
+nothing was spent re-establishing where things live or what had already been decided. The
+evening session cost most of a day's budget again, and almost none of it went on the
+experiment as planned. Two false starts and three design defects absorbed it — which is
+the honest shape of running something rather than designing it, and the reason the two
+most useful findings exist at all.
 
 Models: Claude Sonnet 5 for the initial read of the repository, Claude Opus 5 for everything
 after.
