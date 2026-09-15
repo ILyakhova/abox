@@ -469,32 +469,51 @@ HTTP service.
 |---|---|---|
 | Where embedding happens | out-of-process, `llama-cpp-embeddings` | in-process, fastembed |
 | Memory limit that works | 256Mi | 2Gi (upstream records 256Mi being OOMKilled) |
-| **Measured memory** | **53 MiB** | **510 MiB** |
+| **Measured memory** | **53 MiB** (+ 474 MiB in `llama-cpp-embeddings`) | **510 MiB** |
 | First call | | 7914 ms |
 | Subsequent calls | | 3 ms |
 | Extra dependency | an embeddings service | none |
 
-Nearly ten times apart, and the 510 MiB explains the OOMKill upstream recorded:
-it is double the 256Mi limit that holds the other server comfortably.
+Those two figures look nearly ten times apart, and the 510 MiB does explain the
+OOMKill upstream recorded: it is double the 256Mi limit that holds the other
+server comfortably.
 
-The comparison is not finished at that line, though, and reading it as "the
-official server costs 10× the memory" would be wrong. `qdrant-mcp` is small
+But reading that line as "the official server costs 10× the memory" is wrong,
+and the completed measurement below shows how wrong. `qdrant-mcp` is small
 because it does not embed — it calls `llama-cpp-embeddings`, which has a
 footprint of its own that this column does not show:
 
-| | in-process | out-of-process |
+| | in-process | out-of-process | total |
+|---|---|---|---|
+| `qdrant-mcp-official` | 510 MiB | — | **510 MiB** |
+| `qdrant-mcp` | 53 MiB | `llama-cpp-embeddings` 474 MiB | **527 MiB** |
+
+**They cost the same.** 527 against 510 — a 3% difference, well inside the noise
+of a single measurement. The 10× headline was an artefact of measuring one pod
+of a two-pod design and comparing it against the whole of a one-pod design.
+
+So the architectural choice buys nothing at one consumer, and the honest reading
+of the earlier table is that it was measuring the wrong thing rather than
+revealing a saving.
+
+What does differ is **whether the cost amortises**. The in-process model is
+carried by every instance: a second MCP server, a third, an ingestion job, each
+pays its own 510 MiB. The out-of-process model is paid once and shared.
+
+| consumers | arm M (in-process) | arm N (shared service) |
 |---|---|---|
-| `qdrant-mcp-official` | 510 MiB | — |
-| `qdrant-mcp` | 53 MiB | + `llama-cpp-embeddings` (measure separately) |
+| 1 | 510 MiB | 527 MiB |
+| 2 | 1020 MiB | 580 MiB |
+| 3 | 1530 MiB | 633 MiB |
 
-The real difference is not the total, it is **whether the cost amortises**. The
-in-process model is carried by every instance: a second MCP server, a third,
-an ingestion job, each pays its own 510 MiB. The out-of-process model is paid
-once and shared by every consumer — which is also what makes it a dependency
-that can be down, be a version behind, or be pointed at the wrong endpoint.
+At one consumer the in-process design is simpler and marginally cheaper. The
+crossover is immediate at two, and from there the gap widens by 457 MiB per
+consumer. abox already has two — `qdrant-mcp` and any ingestion job — which is
+what makes the shared service the right default here rather than a preference.
 
-At one consumer the in-process design is simpler and probably cheaper. The
-crossover comes with the second.
+The shared service is also a dependency that can be down, be a version behind,
+or be pointed at the wrong endpoint. That is the cost it trades for, and it is
+not visible in a memory figure.
 
 The first-call cost is the model being pulled from HuggingFace and loaded into
 ONNX. It is paid once per pod start, which makes it a restart cost rather than
