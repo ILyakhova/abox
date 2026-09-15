@@ -257,12 +257,19 @@ plausibly why nobody noticed.
 | 4 | paraphrase | hit | hit | both named `neo4j-mcp` and also `retrieval-agent` as its consumer |
 | 5 | paraphrase | hit | hit | N named both MCP servers; M named `qdrant-mcp` plus the agents using it |
 | 6 | paraphrase | hit | hit | both named `helm-agent` and quoted its description |
-| 7 | deep | hit | hit | both quoted the rule verbatim — but at unequal `k`, see below; re-run pending |
-| 8 | deep | | | |
-| 9 | deep | | | |
-| 10 | deep | | | |
-| 11 | negative | | | |
-| 12 | negative | | | |
+| 7 | deep | hit (1 call) | hit (3 calls) | re-run at k=5; both quoted the rule, but M needed three searches to N's one |
+| 8 | deep | hit (1 call) | hit (3 calls) | same split as 7: N first search, M third |
+| 9 | deep | void (6 calls) | void (7 calls) | question invalid — see below; both named the server and both correctly reported no recorded reason |
+| 10 | deep | hit (1 call) | partial (2 calls) | N returned both agents with metadata; M named only itself, citing its own prompt |
+| 11 | negative | correct (2 calls) | correct (6 calls) | neither invented; M spent more searching but showed its work, listing both ModelConfigs |
+| 12 | negative | correct (2 calls) | correct (2 calls) | neither invented, neither delegated to k8s-agent; M surfaced a plaintext Neo4j password that is in the corpus |
+
+Record the number of `vector_find` / `qdrant-find` calls alongside the verdict.
+It emerged on the question 7 re-run as the more sensitive measure: both arms
+answered correctly, but one found the document on its first search and the other
+on its third. Hit-or-miss cannot see that, and with a corpus this small most
+questions are answerable eventually — what separates the arms is how much
+searching it takes.
 
 Mark each cell:
 
@@ -325,6 +332,58 @@ on both axes. Whatever comes out of these twelve questions is directional. It
 can reveal a broken pipeline — it already has, twice — but it cannot overturn
 ADR-0001 on its own, and the ADR entry should say so.
 
+## Question 9 was invalid, and the reason is worth keeping
+
+It asked which MCP server carries a 2Gi memory limit *and what reason is
+recorded for it*. The reason is recorded — in a YAML comment in
+`lab4/qdrant-mcp-official.yaml`. Comments do not survive being applied:
+Kubernetes stores the parsed object, the ingest read the live object through
+k8s-agent, and no comment from any lab file has ever been in either collection.
+
+Both arms named the server, both said no reason was recorded, and both inferred
+one from `EMBEDDING_PROVIDER: fastembed`. That is exactly right, and the
+question scores nothing about either model.
+
+It cost them the most effort of any question so far — six searches and seven —
+because they were looking for something that does not exist. That is the
+signature of an unanswerable question rather than a hard one, and it is worth
+recognising: high call counts on both arms means the corpus lacks the answer,
+while a split in call counts is the signal we are actually after.
+
+The general lesson for anything that indexes Kubernetes objects: **the
+rationale lives in the repository, the cluster holds only the outcome.** A RAG
+corpus built from the live cluster can answer what is configured and never why.
+Indexing the manifests from git is a different corpus with different content,
+not a tidier version of the same one.
+
+## A credential reached the corpus, and excluding Secrets did not stop it
+
+Question 12 asked for the kagent Postgres password. Both arms correctly said it
+is not in the collection — and arm M, listing what it had found instead, named
+`abox-neo4j`, the Neo4j password, quoting `neo4j-mcp` as the source.
+
+It is in the corpus because it is in the object:
+
+```yaml
+env:
+  NEO4J_MCP_PASSWORD: abox-neo4j
+```
+
+Both prompts forbid ingesting `Secret`, and both obeyed. It made no difference.
+The rule assumes credentials live in Secrets; this one lives in an MCPServer
+spec, which is exactly the kind of object the corpus is built from. A
+kind-based exclusion list cannot see it.
+
+This is not a finding about either embedding model, and it is the most portable
+thing in the lab. **Anything that indexes live Kubernetes objects into a vector
+store should be assumed to be indexing whatever credentials are sitting in
+plain fields**, and a retrieval agent will surface them on a question that never
+mentioned them. Excluding kinds is not a control; scanning values is.
+
+Worth acting on separately from LAB4: `neo4j-mcp` should take its password from
+a Secret reference, and the ingest guidance in both agents should say to skip
+fields whose names look like credentials rather than trusting the kind.
+
 ## What a result would mean
 
 **If M loses on C and ties on A and B** — ADR-0001's reasoning holds: the
@@ -342,6 +401,63 @@ lighter model becomes defensible for short chunks.
 **If both lose on D** — the finding is about neither model. It says the prompt
 does not hold the agent to its sources, which is a bigger problem than either
 embedder.
+
+## What actually happened
+
+Of the pre-registered outcomes, the closest is **"M holds its own throughout"** —
+with one qualification that the hit/miss column cannot express.
+
+**Sections A and B: identical.** Six questions, six hits each. Exact-term and
+paraphrase retrieval over a 14-document corpus is not a discriminating task, and
+neither model had trouble with it.
+
+**Section C: the same answers, different effort.** On questions 7 and 8 both
+arms quoted the right rule verbatim — but arm N found it on its first search and
+arm M on its third, twice in a row. On question 10 the split widened into
+content: arm N returned both matching agents with metadata on one search, while
+arm M returned one, itself, and cited its own system prompt rather than the
+collection. Question 9 scored nothing for either arm and is void.
+
+**Section D: both honest.** Neither invented an answer, neither delegated to
+k8s-agent to fill the gap. The prompts held.
+
+| | Arm N (nomic) | Arm M (MiniLM) |
+|---|---|---|
+| Hits | 8 of 9 scored, 1 hit that was a partial for M | 7 of 9 scored |
+| Searches on sections C and D | 1, 1, 6, 1, 2, 2 | 3, 3, 7, 2, 6, 2 |
+| Negative controls | both correct | both correct |
+
+**What this does and does not support.** It does not support ADR-0001's stated
+reason for rejecting all-MiniLM-L6-v2. The prediction was that a 256-token
+window would make deep content unreachable, and that is not what happened:
+MiniLM reached it, because truncation affects only the embedding while Qdrant
+returns the full text for the language model to read. Once a document is in the
+result set, the window has already done all the harm it is going to do.
+
+What the results do show is a consistent difference in **ranking efficiency** —
+arm M needed two to three times as many searches to reach the same documents,
+and on the one question where a second document mattered, it did not reach it at
+all. That is a real and repeatable difference, and it is the shape you would
+expect from a weaker embedding: not blindness, but a noisier ordering that the
+agent compensates for by searching again.
+
+Whether the cause is the 256-token window, the 384-dimension space, or the fact
+that arm N's pipeline chunks and arm M's does not, this lab cannot separate.
+All three differ between the arms.
+
+**The two most useful results are not about the models at all.** `vector_find`
+was returning nothing to every agent in the cluster and nobody had noticed, and
+a plaintext credential is sitting in the corpus despite an explicit rule meant
+to keep credentials out. Both were found because the protocol had a control
+question and a negative control in it, not because anyone went looking.
+
+**What ADR-0001 should say.** The entry rejecting all-MiniLM-L6-v2 should keep
+the rejection but replace its justification, the same way ADR-0002's llm-d claims
+were corrected. The honest version is that the model ranks measurably less well
+on this corpus at equal `k`, not that its context window makes long documents
+unreachable. And the ADR's own benchmark rule should be cited against this lab:
+twelve questions over fourteen documents is three orders of magnitude short of
+what that rule demands, so this is a signal, not a verdict.
 
 ## Cost side, recorded separately
 
