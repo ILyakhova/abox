@@ -7,6 +7,7 @@ help:
 	@echo "  tofu       - Initialize OpenTofu"
 	@echo "  apply      - Apply OpenTofu configuration"
 	@echo "  fix-egress - Repair nested-Docker egress (Codespaces) and verify nodes"
+	@echo "  fix-docker-acl - Clear the /tmp default ACL that breaks non-root images"
 
 run:
 	@bash scripts/setup.sh
@@ -22,6 +23,10 @@ tools:
 fix-egress:
 	@bash scripts/fix-egress.sh
 	@bash scripts/fix-egress.sh verify abox
+
+fix-docker-acl:
+	@bash scripts/fix-docker-acl.sh
+	@bash scripts/fix-docker-acl.sh verify abox
 
 tofu:
 	@cd bootstrap && tofu init

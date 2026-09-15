@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: neo4j
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: neo4j
+  namespace: flux-system
+spec:
+  interval: 1h
+  # An HTTP Helm repo, like qdrant -- Neo4j does not publish this chart to an
+  # OCI registry, so this is chart.spec + HelmRepository, not chartRef.
+  url: https://helm.neo4j.com/neo4j
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: neo4j
+  namespace: neo4j
+spec:
+  interval: 1h
+  releaseName: neo4j
+  chart:
+    spec:
+      chart: neo4j
+      version: "2026.7.1"
+      sourceRef:
+        kind: HelmRepository
+        name: neo4j
+        namespace: flux-system
+  install:
+    createNamespace: true
+  values:
+    # Several templates call `lookup` to reuse an existing Secret. Lookups
+    # return empty during a dry-run, so the rendered auth Secret differs between
+    # the diff and the apply and the release never settles.
+    disableLookups: true
+
+    neo4j:
+      name: neo4j
+      edition: community
+      # Left empty the chart generates a random password on install and stores
+      # it in a Secret, which makes the release non-reproducible -- a re-install
+      # invalidates every client. This is a local sandbox with no secret
+      # management, the same reason kagent ships a plaintext Postgres DSN.
+      password: "abox-neo4j"
+      resources:
+        cpu: "500m"
+        memory: "2Gi"
+
+    volumes:
+      data:
+        # REQUIRED by the chart; there is no default. KinD's local-path
+        # provisioner is the default StorageClass.
+        mode: defaultStorageClass
+        defaultStorageClass:
+          accessModes:
+            - ReadWriteOnce
+          requests:
+            storage: 5Gi
+
+    # neo4j/mcp's get-schema calls apoc.meta.*. APOC core ships inside the
+    # image; this is what moves it into plugins/ at container start.
+    env:
+      NEO4J_PLUGINS: '["apoc"]'
+
+    # Loading the jar is not enough -- apoc.meta.schema reads internal store
+    # APIs, so without these it registers as unavailable:
+    #
+    #   Neo.ClientError.Procedure.ProcedureRegistrationFailed
+    #   (apoc.meta.schema is unavailable)
+    config:
+      dbms.security.procedures.unrestricted: "apoc.*"
+      dbms.security.procedures.allowlist: "apoc.*"
+
+    services:
+      neo4j:
+        # The chart defaults this to a LoadBalancer for Neo4j Browser. KinD has
+        # one LB address and agentgateway already holds it, so this would sit
+        # Pending forever. The ClusterIP Service the chart always creates is
+        # what in-cluster clients use:
+        #
+        #   bolt://neo4j.neo4j:7687     HTTP http://neo4j.neo4j:7474
+        #
+        # For Browser, port-forward: kubectl port-forward -n neo4j svc/neo4j 7474 7687
+        enabled: false

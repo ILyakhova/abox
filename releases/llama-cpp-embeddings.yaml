@@ -1,0 +1,163 @@
+# llama.cpp serving nomic-embed-text-v1.5 GGUF (embeddings URL #2).
+#
+# Second, much lighter embeddings backend next to the vllm one in
+# releases/llmd.yaml. Same model, same 768-dim vector space, ~275MB of weights
+# and ~500m CPU instead of a multi-gigabyte vllm runtime.
+#
+# Args and resources are a production llama.cpp embedder sidecar's, verbatim
+# (the reference repo charts/triageagent/values.yaml -> embedding.sidecar, and
+# values-xray.yaml which turns it on).
+#
+# The model is BAKED into the image, so nothing is fetched from HuggingFace when
+# the pod starts. That matters most on Codespaces, where egress is broken until
+# `make fix-egress` runs, and it avoids re-downloading the weights on every
+# reschedule.
+#
+# The image is already published and public. To rebuild it -- or to get an
+# arm64 build, which the published one is not -- see images/nomic-embed/Dockerfile
+# and .github/workflows/nomic-embed-image.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llama-cpp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llama-cpp-embeddings
+  namespace: llama-cpp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: llama-cpp-embeddings
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: llama-cpp-embeddings
+    spec:
+      containers:
+        - name: llama-server
+          # The prebuilt embedder image, published to this repo's GHCR
+          # namespace. nomic-embed-text-v1.5 GGUF baked at /models/model.gguf,
+          # on a llama.cpp server base.
+          #
+          # Two properties of this specific image that matter:
+          #
+          #   amd64 ONLY -- it is a single manifest, not an index. Fine on
+          #   Codespaces and any x86 node; it will NOT run natively on an arm64
+          #   Mac. images/nomic-embed/Dockerfile builds a multi-arch f16
+          #   equivalent if that is needed.
+          #
+          #   Its baked CMD is only --host/--port/--embeddings/--model. The
+          #   --ctx-size, --ubatch-size and --parallel below are NOT defaults --
+          #   without them llama.cpp serves a single slot at a much smaller
+          #   context. They have to stay on the Deployment.
+          #
+          # The model layer is ~134MB, so this is a quantized GGUF rather than
+          # f16. That matches the deployment it was copied from, which is what
+          # makes its vectors comparable with the cells that deployment
+          # embedded.
+          image: ghcr.io/den-vasyliev/abox/nomic-embed:v1.18.1-4ccc0ff
+          # No command: -- the upstream ENTRYPOINT is the llama-server binary
+          # and its path varies between image variants.
+          args:
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8090"
+            # Without this the server exposes completions, not /v1/embeddings.
+            - --embeddings
+            # 16384 / --parallel 8 = 2048 tokens per slot, which is nomic's full
+            # context window. --ubatch-size must be >= a slot because a pooled
+            # embedding has to fit in a single micro-batch; it is the real
+            # per-request ceiling here, not --ctx-size.
+            - --ctx-size
+            - "16384"
+            - --ubatch-size
+            - "2048"
+            - --model
+            - /models/model.gguf
+            - --parallel
+            - "8"
+          ports:
+            - containerPort: 8090
+              name: http
+          # The GGUF is mmap'd and loads in ~2s, so the budget only has to cover
+          # scheduling: 5s x 12 = 60s.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            periodSeconds: 30
+          # Exactly a production llama.cpp embedder sidecar's resources, confirmed
+          # against the running pod:
+          #
+          #   $ kubectl top pod -n the reference embedder deployment --containers
+          #   triage-controller-...   embedder   1m   81Mi
+          #
+          # ~75Mi resident for the same model vLLM needs 2466Mi for -- the GGUF
+          # is mmap'd, so the weights barely count against RSS. The 512Mi
+          # request is already generous; CPU is the real throughput lever, and
+          # under node contention a query embed measured 52ms vs 4ms on a
+          # laptop core, which is why the request is 500m and not 100m.
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: llama-cpp-embeddings
+  namespace: llama-cpp
+spec:
+  selector:
+    app.kubernetes.io/name: llama-cpp-embeddings
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+      protocol: TCP
+---
+# Embeddings URL #2, external:  http://<gateway-ip>/llamacpp/v1/embeddings
+#                   in-cluster: http://llama-cpp-embeddings.llama-cpp:8090/v1/embeddings
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: llama-cpp-embeddings
+  namespace: llama-cpp
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-external
+      namespace: agentgateway-system
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /llamacpp
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: llama-cpp-embeddings
+          port: 8090

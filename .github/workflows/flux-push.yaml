@@ -28,11 +28,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # This workflow fires on any v* tag, from any branch. One artifact
+      # repository for all of them would merge the streams: the RSIP filter is
+      # ^\d+\.\d+\.\d+$ with limit 1, so the newest tag from a feature branch
+      # would outrank main's and a cluster bootstrapped from main would run the
+      # branch's bundle. Keep main on "releases" and give every other branch its
+      # own, matching bootstrap/variables.tf releases_artifact.
+      - name: Resolve artifact repository
+        id: repo
+        run: |
+          if git branch -r --contains "${GITHUB_SHA}" | grep -qE '^[[:space:]]*origin/main$'; then
+            branch=main
+          else
+            branch=$(git branch -r --contains "${GITHUB_SHA}" \
+              --format='%(refname:lstrip=3)' | grep -v '^HEAD' | head -1)
+          fi
+          if [ "${branch}" = "main" ]; then
+            repo=releases
+          else
+            repo="releases-$(printf '%s' "${branch}" \
+              | sed 's|^.*/||; s|[^A-Za-z0-9._-]|-|g' | tr '[:upper:]' '[:lower:]')"
+          fi
+          echo "name=${repo}" >> $GITHUB_OUTPUT
+          echo "${GITHUB_REF_NAME} is on '${branch}' -> ${repo}"
+
       - name: Push OCI artifact
         id: push
         run: |
           TAG=${GITHUB_REF_NAME#v}
-          digest=$(flux push artifact oci://ghcr.io/${{ github.repository }}/releases:${TAG} \
+          digest=$(flux push artifact oci://ghcr.io/${{ github.repository }}/${{ steps.repo.outputs.name }}:${TAG} \
             --path="./releases" \
             --source="${{ github.repositoryUrl }}" \
             --revision="${{ github.ref_name }}@sha1:${{ github.sha }}" \
@@ -43,5 +67,5 @@ jobs:
       - name: Tag artifact
         run: |
           flux tag artifact \
-            oci://ghcr.io/${{ github.repository }}/releases:${{ steps.push.outputs.tag }}@${{ steps.push.outputs.digest }} \
+            oci://ghcr.io/${{ github.repository }}/${{ steps.repo.outputs.name }}:${{ steps.push.outputs.tag }}@${{ steps.push.outputs.digest }} \
             --tag latest

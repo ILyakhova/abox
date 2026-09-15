@@ -9,7 +9,7 @@ module "flux_operator" {
   source  = "controlplaneio-fluxcd/flux-operator-bootstrap/kubernetes"
   version = "0.8.0"
 
-  depends_on = [kind_cluster.this]
+  depends_on = [terraform_data.cluster]
 
   revision = var.bootstrap_revision
 
@@ -39,7 +39,7 @@ resource "kubectl_manifest" "rsip" {
         fluxcd.controlplane.io/reconcileEvery: 5m
     spec:
       type: OCIArtifactTag
-      url: ${var.oci_registry}/releases
+      url: ${var.oci_registry}/${var.releases_artifact}
       filter:
         includeTag: "^\\d+\\.\\d+\\.\\d+$"
         limit: 1
@@ -72,7 +72,7 @@ resource "kubectl_manifest" "rset" {
           namespace: flux-system
         spec:
           interval: 2m
-          url: ${var.oci_registry}/releases
+          url: ${var.oci_registry}/${var.releases_artifact}
           ref:
             tag: "<< inputs.tag >>"
       - apiVersion: kustomize.toolkit.fluxcd.io/v1

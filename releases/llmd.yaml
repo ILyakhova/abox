@@ -1,0 +1,337 @@
+# llm-d serving nomic-embed-text-v1.5 on CPU (embeddings URL #1).
+#
+# Mirrors a working deployment on a reference GKE cluster
+# (helm release llm-d/llm-d-modelservice-embedding, chart v0.3.17), with four
+# deliberate deviations for abox -- each called out inline below.
+#
+# What is NOT installed here, and why:
+#
+#   llm-d-infra -- it exists to stand up a Gateway + GatewayParameters. abox
+#                  already has one (agentgateway-external, allowedRoutes: from
+#                  All), and on KinD a second LoadBalancer Gateway would just
+#                  contend for the single available LB address. The HTTPRoute at
+#                  the bottom attaches to the existing Gateway instead.
+#
+# The InferencePool + EPP the reference deployment runs ARE installed, at the
+# bottom of this file. They need the inference.networking.* CRDs, which are not
+# part of Gateway API -- see releases/crds/inference-extension-crds.yaml.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: llm-d
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: llm-d-modelservice
+  namespace: flux-system
+spec:
+  interval: 1h
+  # An HTTP Helm repo, like qdrant -- llm-d does not publish these charts to an
+  # OCI registry, so this is chart.spec + HelmRepository, not chartRef.
+  url: https://llm-d-incubation.github.io/llm-d-modelservice/
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: llm-d-embedding
+  namespace: llm-d
+spec:
+  interval: 1h
+  releaseName: llm-d-embedding
+  chart:
+    spec:
+      chart: llm-d-modelservice
+      # Pinned to the version the reference deployment runs. v0.4.x is current
+      # upstream but moves the values schema; bump both together after
+      # re-rendering.
+      version: "v0.3.17"
+      sourceRef:
+        kind: HelmRepository
+        name: llm-d-modelservice
+        namespace: flux-system
+  install:
+    createNamespace: true
+  values:
+    accelerator:
+      type: cpu
+
+    modelArtifacts:
+      name: nomic-ai/nomic-embed-text-v1.5
+      # The GGUF image from images/nomic-embed, mounted as a Kubernetes image
+      # volume (KEP-4639) rather than downloaded. Needs containerd >= 2.0 and
+      # the ImageVolume gate; both are present on the kind v1.37 nodes. The
+      # model lands at <mountPath>/models/model.gguf because an image volume
+      # mounts the image rootfs.
+      uri: oci://ghcr.io/den-vasyliev/abox/nomic-embed:v1.18.1-4ccc0ff
+      mountPath: /model-cache
+      # These land on the pod template and are what the Service below selects.
+      labels:
+        llm-d.ai/inferenceServing: "true"
+        llm-d.ai/model: nomic-embed-text-v1-5
+
+    prefill:
+      create: false
+
+    decode:
+      create: true
+      replicas: 1
+      monitoring:
+        podmonitor:
+          # abox ships no Prometheus Operator, so leaving this on fails the
+          # release with "no matches for kind PodMonitor in version
+          # monitoring.coreos.com/v1".
+          enabled: false
+      containers:
+        - name: llama-cpp
+          # `custom` rather than `vllmServe` or `imageDefault`: both of those go
+          # through argsByProtocol, which hard-fails on oci:// ("arguments for
+          # oci:// not implemented"). customModelCommand emits only
+          # command/args, so the image volume is still rendered but that code
+          # path is never reached.
+          modelCommand: custom
+          # llama.cpp, not vLLM. vLLM's CPU backend cannot serve this model
+          # here: the worker process is killed by a signal on the first forward
+          # pass, at float16 and bfloat16 alike, and with the memory limit
+          # raised to 9Gi, so it is not OOM. llama.cpp serves the same model
+          # from the same weights in a fraction of the memory.
+          image: ghcr.io/ggml-org/llama.cpp:server-b10920
+          imagePullPolicy: IfNotPresent
+          # Renders the model-storage image volume and mounts it readOnly at
+          # modelArtifacts.mountPath.
+          mountModelVolume: true
+          command: ["/app/llama-server"]
+          args:
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
+            - --embeddings
+            # Without this /metrics answers 501. Note the containerPort below
+            # is named "metrics" but is the serving port -- llama.cpp exposes
+            # its Prometheus counters on the same listener as the API.
+            - --metrics
+            # 16384 over --parallel 8 is 2048 tokens per slot, nomic's full
+            # window. --ubatch-size must be at least a slot because a pooled
+            # embedding has to fit in one micro-batch, which makes it the real
+            # per-request ceiling rather than --ctx-size.
+            - --ctx-size
+            - "16384"
+            - --ubatch-size
+            - "2048"
+            - --parallel
+            - "8"
+            - --model
+            - /model-cache/models/model.gguf
+          ports:
+            - containerPort: 8000
+              name: metrics
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          # The GGUF is mmap'd from the read-only image volume, so the weights
+          # are file-backed and do not count against the working set.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+
+    routing:
+      servicePort: 8000
+      proxy:
+        # The llm-d-routing-sidecar is a nixl connector for prefill/decode
+        # disaggregation. With prefill.create false there is nothing to
+        # disaggregate. Off here means the server binds routing.servicePort
+        # (8000) directly.
+        enabled: false
+---
+# The modelservice chart renders a Deployment but no Service (the reference
+# deployment's were
+# applied by hand), so it is spelled out here. Selector matches the pod labels
+# the chart derives from modelArtifacts.labels + the decode role.
+apiVersion: v1
+kind: Service
+metadata:
+  name: llm-d-embedding
+  namespace: llm-d
+spec:
+  selector:
+    llm-d.ai/inferenceServing: "true"
+    llm-d.ai/model: nomic-embed-text-v1-5
+    llm-d.ai/role: decode
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+---
+# InferencePool + EPP (endpoint picker), the reference deployment's inference pool.
+#
+# Chart v1.5.0 is the newest PUBLISHED one -- registry.k8s.io has no
+# inferencepool chart at v1.6.0/v1.6.1 even though those GIE releases exist.
+# It also ships no crds/ directory, hence releases/crds/inference-extension-crds.yaml.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: inferencepool
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://registry.k8s.io/gateway-api-inference-extension/charts/inferencepool
+  ref:
+    # Tags here carry the leading v -- "1.5.0" is not found.
+    tag: "v1.5.0"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: llm-d-pool
+  namespace: llm-d
+spec:
+  interval: 1h
+  releaseName: llm-d-pool
+  dependsOn:
+    # The EPP watches the pool's endpoints; without the model pods there is
+    # nothing to pick. Not a hard requirement, but it keeps first-apply ordering
+    # readable.
+    - name: llm-d-embedding
+      namespace: llm-d
+  chartRef:
+    kind: OCIRepository
+    name: inferencepool
+    namespace: flux-system
+  install:
+    createNamespace: true
+  values:
+    provider:
+      # the reference cluster sets this to "gke", which renders GKE-specific
+      # HealthCheckPolicy/GCPBackendPolicy objects whose CRDs only exist on GKE.
+      # "none" is the right value for KinD.
+      name: none
+    inferenceExtension:
+      apiVersion: inference.networking.k8s.io/v1
+      # The chart defaults the EPP to 4 CPU / 8Gi, which no kind node on a
+      # 4-core Codespace can satisfy -- the pod sits Pending with
+      # "Insufficient cpu". This key is nested under inferenceExtension; a
+      # top-level `resources` is silently ignored.
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+      monitoring:
+        prometheus:
+          # abox has no Prometheus Operator -- same reason the decode PodMonitor
+          # above is off.
+          enabled: false
+        gke:
+          enabled: false
+    inferencePool:
+      name: llm-d-pool
+      # The GA group. agentgateway resolves InferencePool backendRefs through
+      # sigs.k8s.io/gateway-api-inference-extension/api/v1 (see
+      # controller/pkg/wellknown/gwapi.go), so v1 is what it can actually route to.
+      apiVersion: inference.networking.k8s.io/v1
+      targetPortNumber: 8000
+      modelServers:
+        # Scoped to THIS model, not the blanket llm-d.ai/inferenceServing: "true"
+        # the reference deployment uses. A pool is per base model: the moment a
+        # second model is
+        # added, a blanket selector silently pulls its pods into this pool and
+        # the EPP starts handing embedding requests to the wrong server.
+        matchLabels:
+          llm-d.ai/model: nomic-embed-text-v1-5
+
+---
+# The reference cluster still has an InferenceModel for this, but that kind is
+# gone: GIE dropped
+# inferencemodels from config/crd/bases in v1.4.0. InferenceObjective is the
+# successor, and the older copies survive only because its CRD predates the bundle
+# its cluster now runs.
+#
+# Written out by hand rather than via the chart's inferenceObjectives value --
+# that template is broken upstream in v1.5.0 (templates/inferenceobjectives.yaml
+# dereferences .Values inside a range, so it renders as
+# "nil pointer evaluating interface {}.inferenceExtension").
+apiVersion: inference.networking.x-k8s.io/v1alpha2
+kind: InferenceObjective
+metadata:
+  name: nomic-embed-text
+  namespace: llm-d
+spec:
+  priority: 1
+  poolRef:
+    group: inference.networking.k8s.io
+    kind: InferencePool
+    name: llm-d-pool
+---
+# Embeddings URL #1, external:  http://<gateway-ip>/llmd/v1/embeddings
+#                   in-cluster: http://llm-d-embedding.llm-d:8000/v1/embeddings
+#
+# Two rules, mirroring the reference deployment's internal route: embeddings go straight to
+# the decode Service, everything else goes through the pool. The bypass is
+# deliberate on the reference cluster and worth keeping -- the EPP's scorers (prefix-cache,
+# kv-cache-utilization, queue) and its openai-parser are built around
+# decode/prefill generation traffic, not a pooling runner's single-shot
+# /v1/embeddings. With one replica of one model there is also nothing to
+# schedule. The pool is what makes this extend to a second model later.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: llm-d-embedding
+  namespace: llm-d
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-external
+      namespace: agentgateway-system
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /llmd/v1/embeddings
+      filters:
+        # Both backends serve OpenAI-compatible /v1/embeddings, so they can only
+        # share one Gateway listener if the prefix is stripped before the hop.
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /v1/embeddings
+      backendRefs:
+        - name: llm-d-embedding
+          port: 8000
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /llmd
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - group: inference.networking.k8s.io
+          kind: InferencePool
+          name: llm-d-pool
+          port: 8000

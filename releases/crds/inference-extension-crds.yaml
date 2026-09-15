@@ -1,0 +1,62 @@
+# Gateway API Inference Extension CRDs, v1.5.0.
+#
+# These are NOT part of Gateway API. InferencePool went GA as
+# inference.networking.k8s.io/v1, which makes it easy to assume the gateway-api
+# bundle carries it -- it does not. Checked at the exact tag abox pins:
+#
+#   $ gh api repos/kubernetes-sigs/gateway-api/contents/config/crd/experimental?ref=v1.6.2
+#   gateway.networking.k8s.io_*.yaml, gateway.networking.x-k8s.io_x{backends,
+#   backendtrafficpolicies,meshes}.yaml     # no inference.networking.* at all
+#
+# On a managed GKE cluster nothing installs them by hand either -- they arrive
+# with the managed Gateway API addon, which is why they look built-in there:
+#
+#   $ kubectl get crd inferencepools.inference.networking.k8s.io -o jsonpath='{.metadata.annotations}'
+#   components.gke.io/component-name: gateway-api-crds
+#   components.gke.io/component-version: 1.6.0-gke.3502
+#   inference.networking.k8s.io/bundle-version: v1.4.0
+#
+# KinD has no such addon, and the inferencepool chart ships no crds/ directory
+# (verified against v1.5.0), so they have to come from here or the EPP's
+# informers 404 and llm-d never gets an InferencePool.
+#
+# Applies all four bases via the repo's own config/crd/kustomization.yaml:
+# inferencepools (k8s.io/v1, GA) plus inferenceobjectives, inferencemodelrewrites
+# and inferencepoolimports (x-k8s.io/v1alpha2). The first three are exactly what
+# the EPP's Role grants get/watch/list on, so trimming the set would leave an
+# informer watching a kind that does not exist.
+#
+# NOTE on version choice: v1.6.1 is the newest release, but it drops
+# inferenceobjectives and inferencemodelrewrites from config/crd/bases, and no
+# inferencepool chart is published above v1.5.0. v1.5.0 is the newest version
+# where CRDs and chart still line up.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: gateway-api-inference-extension
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://github.com/kubernetes-sigs/gateway-api-inference-extension
+  ref:
+    tag: v1.5.0
+  # Whole config/crd, selected by path below -- same reasoning as
+  # gateway-api-crds.yaml: the artifact is keyed on the git revision, so
+  # narrowing this later would not rebuild it.
+  ignore: |
+    /*
+    !/config/crd/
+---
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: inference-extension-crds
+  namespace: flux-system
+spec:
+  interval: 1h
+  sourceRef:
+    kind: GitRepository
+    name: gateway-api-inference-extension
+  path: ./config/crd
+  prune: true
+  wait: true
