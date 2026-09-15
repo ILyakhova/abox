@@ -1,0 +1,60 @@
+# LAB4 — the official Qdrant MCP server, github.com/qdrant/mcp-server-qdrant.
+#
+# Applied by hand, not through Flux: this cluster reconciles the upstream
+# artifact, so anything in releases/ here would never reach it. Nothing in this
+# directory ships.
+#
+# Runs alongside the shipped qdrant-mcp rather than replacing it. The two are
+# the arms of the comparison:
+#
+#   qdrant-mcp           nomic-embed-text-v1.5, 768 dims, embeds out-of-process
+#                        against llama-cpp-embeddings, collection abox-nomic
+#   qdrant-mcp-official  all-MiniLM-L6-v2, 384 dims, embeds in-process with
+#                        fastembed, collection abox-minilm
+#
+# Separate collections are mandatory, not tidiness: 384 and 768 dims cannot
+# share one, and even at equal width vectors from different models do not.
+---
+apiVersion: kagent.dev/v1alpha1
+kind: MCPServer
+metadata:
+  name: qdrant-mcp-official
+  namespace: kagent
+spec:
+  transportType: stdio
+  stdioTransport: {}
+  deployment:
+    # Built from the upstream Dockerfile and side-loaded with
+    # `kind load docker-image`, so no registry is involved. IfNotPresent is
+    # therefore required -- Always would send the kubelet to Docker Hub for a
+    # tag that does not exist there.
+    image: docker.io/library/mcp-server-qdrant:local
+    imagePullPolicy: IfNotPresent
+    # The image's own CMD is `uvx mcp-server-qdrant --transport sse`. Neither
+    # part suits us: kagent's kmcp adapts a stdio server to streamable HTTP
+    # itself, and uvx would re-resolve the package from PyPI on every start.
+    # The Dockerfile already did `uv pip install --system`, so call the
+    # installed console script and let it default to stdio.
+    cmd: mcp-server-qdrant
+    env:
+      QDRANT_URL: http://qdrant.qdrant:6333
+      COLLECTION_NAME: abox-minilm
+      # fastembed is the default provider; stated so the arm is self-describing
+      # rather than implied. This model is the server's own default -- the lab
+      # measures what someone gets by installing the official server and not
+      # choosing anything.
+      EMBEDDING_PROVIDER: fastembed
+      EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
+      QDRANT_SEARCH_LIMIT: "10"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      # Deliberately far above the 256Mi the shipped qdrant-mcp runs in. That
+      # server hands embedding to an HTTP service and stays small; this one
+      # loads all-MiniLM into its own process through fastembed, and upstream
+      # records it being OOMKilled doing exactly that. The model is fetched
+      # from HuggingFace on first use, so the first call is also the slowest.
+      limits:
+        cpu: "1"
+        memory: 2Gi

@@ -1,0 +1,102 @@
+# LAB4 — the comparison arm against the shipped retrieval-agent.
+#
+# A separate Agent rather than a patch on retrieval-agent, for two reasons.
+# retrieval-agent carries kustomize.toolkit.fluxcd.io/name=releases, so any
+# edit to it is reverted within the Kustomization's interval. And keeping both
+# alive turns the comparison into something that can actually be run: the same
+# questions, put to two agents, same model, same ingest source, differing only
+# in which vector store answers.
+#
+# Scope note: this agent has no graph tools, while retrieval-agent has Neo4j.
+# That is deliberate. The measurement is embedding quality, so questions used
+# for the comparison must be vector-shaped ("find the manifest that does X").
+# A relationship question would be won by the graph for reasons that have
+# nothing to do with embeddings, and belongs outside this comparison.
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: retrieval-agent-official
+  namespace: kagent
+spec:
+  type: Declarative
+  description: >-
+    Retrieval over a vector store reached through the official Qdrant MCP
+    server (all-MiniLM-L6-v2). Comparison arm for retrieval-agent.
+  declarative:
+    modelConfig: gemini-gemini-3-5-flash
+    stream: true
+    systemMessage: |
+      You are a retrieval agent over one vector store in this cluster, reached
+      through the official Qdrant MCP server. The tools are the contract; which
+      model backs them is not your concern.
+
+      - `qdrant-store` writes one piece of information, with optional metadata.
+      - `qdrant-find` takes free text and returns semantically similar entries.
+
+      The collection is fixed by the server. You do not choose it and cannot
+      query another one.
+
+      ## Ingest
+
+      Manifests come from the k8s-agent delegate. Ask it for the YAML of the
+      objects you were told to ingest; it is the only tool here that can read
+      the cluster.
+
+      Ingest declared objects, not the ones a controller generated from them.
+      For kagent that means the custom resources -- kagent.dev Agent,
+      ModelConfig, MCPServer, RemoteMCPServer -- and never the Deployment,
+      Secret or ServiceAccount that appear alongside them. Those carry no
+      authored intent.
+
+      Store one object per `qdrant-store` call. Two rules make the result
+      searchable:
+
+      1. **Put the whole manifest in the information body**, not a summary you
+         wrote. A summary is your words, and a later question phrased in the
+         manifest's words will not find it.
+      2. **Put name, namespace and kind in the metadata**, so a hit can be
+         identified without re-reading the body.
+
+      Storing is not idempotent here: calling `qdrant-store` twice on the same
+      object leaves two entries. Ingest each object once per run, and say so if
+      you are asked to ingest something already stored.
+
+      ## Retrieve
+
+      Answer only from what `qdrant-find` returns.
+
+      Search with the words the question uses. If the first search returns
+      nothing useful, try once more with different wording -- field names
+      instead of prose, or the kind instead of the purpose -- and then stop.
+
+      Quote the metadata of each entry you used, so the answer can be traced to
+      a stored object.
+
+      If the search returns nothing relevant, say so plainly and stop. Do not
+      fill the gap: do not delegate to k8s-agent, do not read the cluster, do
+      not guess from what you know about Kubernetes. "It is not in the
+      collection" is a correct and useful answer, and an invented one is worse
+      than silence.
+
+      Never write during a retrieval question. `qdrant-store` is for ingest
+      only.
+    tools:
+    - type: McpServer
+      mcpServer:
+        apiGroup: kagent.dev
+        kind: MCPServer
+        name: qdrant-mcp-official
+        toolNames:
+        - qdrant-store
+        - qdrant-find
+    # Reads the cluster during ingest only; the prompt forbids delegating while
+    # answering. Without that rule the agent answers from the live cluster and
+    # the retrieval quality of the collection never gets measured -- which is
+    # the whole point of this arm.
+    - type: Agent
+      agent:
+        apiGroup: kagent.dev
+        kind: Agent
+        name: k8s-agent
+        namespace: kagent
