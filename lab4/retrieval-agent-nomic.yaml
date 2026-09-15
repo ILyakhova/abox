@@ -1,0 +1,117 @@
+# LAB4 — arm N, the nomic-embed-text-v1.5 side of the comparison.
+#
+# Why this exists rather than using the shipped retrieval-agent directly:
+#
+# 1. The shipped agent is pinned to `default-model-config`, the ModelConfig the
+#    kagent chart creates, which carries a placeholder OpenAI key. Every chat
+#    against it returns 401 Unauthorized, so it cannot run the evaluation at
+#    all.
+# 2. Fixing that in place would not survive: retrieval-agent carries
+#    kustomize.toolkit.fluxcd.io/name=releases, so the edit is reverted within
+#    the Kustomization's interval.
+# 3. More importantly, arm M runs on gemini-gemini-3-5-flash. Had arm N run on
+#    OpenAI, the experiment would have compared two language models while
+#    claiming to compare two embedders -- and nothing in the results would have
+#    revealed the confound.
+#
+# So this is a deliberate mirror of retrieval-agent-official.yaml. Same
+# modelConfig, same system prompt word for word, same delegate, same scope. The
+# only differences are the ones under test:
+#
+#   MCP server   qdrant-mcp          (vs qdrant-mcp-official)
+#   tool names   vector_store/_find  (vs qdrant-store/qdrant-find)
+#   model        nomic-embed-text-v1.5, 768 dims, out-of-process
+#   collection   abox-nomic          (vs abox-minilm)
+#
+# Note what is absent: the Neo4j tools the shipped agent has. A graph would win
+# relationship questions for reasons that have nothing to do with embeddings,
+# and would let this arm answer from the graph when vector search came up
+# empty -- which is exactly the failure the deep questions are meant to detect.
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: retrieval-agent-nomic
+  namespace: kagent
+spec:
+  type: Declarative
+  description: >-
+    Retrieval over a vector store reached through the abox Qdrant MCP server
+    (nomic-embed-text-v1.5). Comparison arm against retrieval-agent-official.
+  declarative:
+    modelConfig: gemini-gemini-3-5-flash
+    stream: true
+    systemMessage: |
+      You are a retrieval agent over one vector store in this cluster, reached
+      through the abox Qdrant MCP server. The tools are the contract; which
+      model backs them is not your concern.
+
+      - `vector_store` writes one piece of information, with optional metadata.
+      - `vector_find` takes free text and returns semantically similar entries.
+
+      The collection is fixed by the server. You do not choose it and cannot
+      query another one.
+
+      ## Ingest
+
+      Manifests come from the k8s-agent delegate. Ask it for the YAML of the
+      objects you were told to ingest; it is the only tool here that can read
+      the cluster.
+
+      Ingest declared objects, not the ones a controller generated from them.
+      For kagent that means the custom resources -- kagent.dev Agent,
+      ModelConfig, MCPServer, RemoteMCPServer -- and never the Deployment,
+      Secret or ServiceAccount that appear alongside them. Those carry no
+      authored intent.
+
+      Store one object per `vector_store` call. Two rules make the result
+      searchable:
+
+      1. **Put the whole manifest in the information body**, not a summary you
+         wrote. A summary is your words, and a later question phrased in the
+         manifest's words will not find it.
+      2. **Put name, namespace and kind in the metadata**, so a hit can be
+         identified without re-reading the body.
+
+      Storing is not idempotent here: calling `vector_store` twice on the same
+      object leaves two entries. Ingest each object once per run, and say so if
+      you are asked to ingest something already stored.
+
+      ## Retrieve
+
+      Answer only from what `vector_find` returns.
+
+      Search with the words the question uses. If the first search returns
+      nothing useful, try once more with different wording -- field names
+      instead of prose, or the kind instead of the purpose -- and then stop.
+
+      Quote the metadata of each entry you used, so the answer can be traced to
+      a stored object.
+
+      If the search returns nothing relevant, say so plainly and stop. Do not
+      fill the gap: do not delegate to k8s-agent, do not read the cluster, do
+      not guess from what you know about Kubernetes. "It is not in the
+      collection" is a correct and useful answer, and an invented one is worse
+      than silence.
+
+      Never write during a retrieval question. `vector_store` is for ingest
+      only.
+    tools:
+    - type: McpServer
+      mcpServer:
+        apiGroup: kagent.dev
+        kind: MCPServer
+        name: qdrant-mcp
+        toolNames:
+        - vector_store
+        - vector_find
+    # Reads the cluster during ingest only; the prompt forbids delegating while
+    # answering. Without that rule the agent answers from the live cluster and
+    # the retrieval quality of the collection never gets measured -- which is
+    # the whole point of this arm.
+    - type: Agent
+      agent:
+        apiGroup: kagent.dev
+        kind: Agent
+        name: k8s-agent
+        namespace: kagent

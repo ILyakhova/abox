@@ -5,8 +5,26 @@ text becomes a vector.
 
 | Arm | Agent | MCP server | Model | Dims | Context |
 |---|---|---|---|---|---|
-| **N** | `retrieval-agent` | `qdrant-mcp` | nomic-embed-text-v1.5 | 768 | 2048 |
+| **N** | `retrieval-agent-nomic` | `qdrant-mcp` | nomic-embed-text-v1.5 | 768 | 2048 |
 | **M** | `retrieval-agent-official` | `qdrant-mcp-official` | all-MiniLM-L6-v2 | 384 | **256** |
+
+Both agents run on the same ModelConfig, `gemini-gemini-3-5-flash`, and carry
+the same system prompt word for word — only the tool names differ, because the
+two MCP servers name their tools differently.
+
+### Why arm N is not the shipped `retrieval-agent`
+
+The first attempt used it, and it returned `401 Unauthorized` from
+`api.openai.com`: the agent is pinned to `default-model-config`, the ModelConfig
+the kagent chart creates, which carries a placeholder API key. The kagent UI
+showed "Gemini (gemini-3-5-flash)" in the header while the request went to
+OpenAI, so the header is not evidence of anything — the error is.
+
+The failure was useful. Had the shipped agent held a working OpenAI key, it
+would have answered, and the experiment would have compared **GPT against
+Gemini** while reporting the result as nomic against MiniLM. Nothing in the
+results table would have exposed that. The 401 is what forced the language
+model to become a controlled variable instead of an unexamined one.
 
 ## Corpus
 
@@ -20,10 +38,10 @@ matters, it will show up on the long ones and not the short ones.
 
 ## Ingest — run this verbatim in both agents
 
-Do **not** rely on each agent's own prompt to decide what to store. The two
-prompts differ (one says "prose", the other says "the whole manifest"), and
-left alone they would store different text — which would make this a
-comparison of prompts, not of models.
+The two agents now carry the same prompt, so this is belt and braces rather
+than a correction — but state the task explicitly anyway, so the transcript
+records that both arms were given identical instructions and neither was left
+to infer the corpus for itself.
 
 Paste the same instruction into both chats:
 
