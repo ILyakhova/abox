@@ -402,6 +402,37 @@ lighter model becomes defensible for short chunks.
 does not hold the agent to its sources, which is a bigger problem than either
 embedder.
 
+## Arm N in its own right
+
+The abox arm answered all nine scored questions correctly, found the document on
+its first search wherever a first search was enough, quoted collection metadata
+every time rather than answering from its own prompt, and refused both negative
+controls without reaching for the k8s-agent delegate it had available.
+
+Its only miss in the whole lab was question 1 before the server fix, where the
+search had in fact ranked the right manifest first and the result never reached
+it. Nothing in that miss belongs to the agent.
+
+**It did make one mistake of its own: it double-stored an object during ingest.**
+The collection ended with fifteen distinct documents for fourteen objects, while
+the name lists matched arm M's exactly — so one object went in twice. Its own
+system prompt states the rule it broke:
+
+> Storing is not idempotent here: calling `vector_store` twice on the same
+> object leaves two entries. Ingest each object once per run.
+
+It quoted that rule correctly when answering question 10, and had already
+violated it during ingest. One duplicate in fourteen changed nothing here, but
+across repeated ingests a collection fills with copies that compete with each
+other for the same result slots. The conclusion is not to word the prompt more
+firmly: **idempotency has to be enforced by the server, not requested of the
+model.** A content hash on `vector_store` would end it.
+
+What this lab does not say about arm N: nothing about the graph (removed on
+purpose), nothing about non-English text (the corpus is YAML and English
+prompts), nothing about behaviour at a thousand documents, and nothing
+statistical — every question was asked once.
+
 ## What actually happened
 
 Of the pre-registered outcomes, the closest is **"M holds its own throughout"** —
@@ -458,6 +489,59 @@ on this corpus at equal `k`, not that its context window makes long documents
 unreachable. And the ADR's own benchmark rule should be cited against this lab:
 twelve questions over fourteen documents is three orders of magnitude short of
 what that rule demands, so this is a signal, not a verdict.
+
+## Who owns what
+
+Worth stating plainly, because two different upstreams are involved and the
+names invite the wrong reading.
+
+| | Written here | Talks to | Whose server that is |
+|---|---|---|---|
+| `retrieval-agent-nomic` | **ours** — a mirror of abox's shipped `retrieval-agent`, minus the graph | `qdrant-mcp` | **abox upstream** (den-vasyliev) |
+| `retrieval-agent-official` | **ours** | `mcp-server-qdrant` | **the Qdrant project** (qdrant/mcp-server-qdrant) |
+
+Both agents are ours. "Official" refers to the Qdrant project's own MCP server,
+not to anything from abox. The abox-authored agent in this comparison is
+`retrieval-agent-nomic`; there is no upstream agent in the lab at all, because
+the shipped `retrieval-agent` could not be used (placeholder API key, Flux
+reverts, and a graph that would have decided the comparison for the wrong
+reasons).
+
+## Which arm won
+
+**Arm N — the abox stack — on retrieval quality. A tie on everything else.**
+
+| | Arm N (abox `qdrant-mcp`, nomic) | Arm M (Qdrant's server, MiniLM) |
+|---|---|---|
+| Correct answers, 9 scored | 9 | 8 — partial on question 10 |
+| Searches on C and D | 1, 1, 6, 1, 2, 2 | 3, 3, 7, 2, 6, 2 |
+| Invented anything | no | no |
+| Delegated to fill a gap | no | no |
+| Cited the collection rather than itself | always | not on question 10 |
+| Memory, one consumer | 527 MiB | 510 MiB |
+| Memory, two consumers | 580 MiB | 1020 MiB |
+| Cold start | none — service already warm | ~8 s, on every pod restart |
+| Operational simplicity | needs a separate embeddings service | one pod, no dependency |
+
+The win is real but narrow, and it is about **ranking**, not reach. Arm M
+answered nearly everything correctly; it just needed two to three times as many
+searches to get there, and on the one question where the answer spanned two
+objects it found one. Nothing in a transcript flags that as a retrieval problem
+— it shows up as an agent that is slower and costs more tokens.
+
+**Where arm M is genuinely better:** it is one pod with no dependency. At a
+single consumer it also uses slightly less memory. If abox had one vector
+consumer and no embeddings service, the official server would be the reasonable
+choice.
+
+**Why arm N is still the right default here:** abox already has more than one
+consumer, which is where the shared service starts paying for itself, and the
+ranking gap compounds with corpus size rather than shrinking.
+
+**The honest asterisk:** arm N could not have won this at all without a
+one-line fix to abox's own server, made during the lab. Before that fix it lost
+the control question outright, because retrieval returned nothing to it. The
+stack that won was not working when the lab started.
 
 ## Cost side, recorded separately
 
