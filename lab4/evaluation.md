@@ -202,17 +202,62 @@ plausible it sounds.
 11. Which agent uses Anthropic Claude?
 12. What is the Postgres password for kagent?
 
+## What the control question caught
+
+Question 1 is a control: both arms use words that appear verbatim in the
+manifest, so both should hit, and a miss means a broken setup rather than a weak
+model. On the first run **arm N missed it and arm M hit it** — the opposite of
+what ADR-0001 predicts, and the reason the protocol says to stop there.
+
+The cause was not the embedding model. `qdrant-mcp` declares an `outputSchema`
+with a required `body` on every tool but populated only `Content`, leaving
+`structuredContent` at the zero value of its result struct — `{"body":""}`.
+kagent honours the declared schema, so it read an empty string. The server's own
+log shows what it actually returned for the query `neo4j`:
+
+```
+"content":[{"type":"text","text":"[{... \"name\":\"neo4j-mcp\" ..., \"score\":0.61983657}, ...]"}],
+"structuredContent":{"body":""}
+```
+
+The search was correct. nomic ranked the right manifest first at 0.62. The
+payload was right there in `Content`. The agent received the empty
+`structuredContent`, and said, accurately from where it sat, that the collection
+held nothing.
+
+Nothing about this failed loudly. HTTP 200, a well-formed response, no error in
+any log, and an agent whose answer read as a reasonable retrieval miss. This is
+the same failure shape as the rope-scaling defect in ADR-0001: a configuration
+that returns well-formed, useless results and reports success.
+
+**The result it would have produced.** Without the control, the eleven remaining
+questions would have run with arm N blind. all-MiniLM-L6-v2 would have won
+nearly all of them, and the conclusion — written into ADR-0001 as a correction,
+with a results table behind it — would have been that the rejected model
+outperforms the chosen one. The evidence would have looked strong and been
+worthless.
+
+Fixed in `mcp/qdrant-mcp/internal/tools/embeddings.go` by populating both halves
+of the result, rebuilt as `qdrant-mcp:lab4`, and run from
+`lab4/qdrant-mcp-fixed.yaml` because the shipped MCPServer is Flux-managed.
+After the fix arm N answers question 1 correctly.
+
+The defect is in the shipped server, not in lab scaffolding: `vector_find` has
+been returning nothing to every agent in the cluster for as long as the tool has
+existed, and the shipped `retrieval-agent` has a graph to fall back on, which is
+plausibly why nobody noticed.
+
 ## Recording results
 
 | # | Kind | Arm N (nomic) | Arm M (MiniLM) | Note |
 |---|---|---|---|---|
-| 1 | exact | | | |
-| 2 | exact | | | |
-| 3 | exact | | | |
-| 4 | paraphrase | | | |
-| 5 | paraphrase | | | |
-| 6 | paraphrase | | | |
-| 7 | deep | | | |
+| 1 | exact | hit | hit | arm N missed before the structuredContent fix; both hit after |
+| 2 | exact | hit | hit | both named `gemini-gemini-3-5-flash` and quoted metadata |
+| 3 | exact | hit | hit | both named `abox-minilm` and quoted the env var |
+| 4 | paraphrase | hit | hit | both named `neo4j-mcp` and also `retrieval-agent` as its consumer |
+| 5 | paraphrase | hit | hit | N named both MCP servers; M named `qdrant-mcp` plus the agents using it |
+| 6 | paraphrase | hit | hit | both named `helm-agent` and quoted its description |
+| 7 | deep | hit | hit | both quoted the rule verbatim — but at unequal `k`, see below; re-run pending |
 | 8 | deep | | | |
 | 9 | deep | | | |
 | 10 | deep | | | |
@@ -229,6 +274,56 @@ Mark each cell:
 A **miss** in section C is the expected result for arm M and is not a defect in
 the model; it is the 256-token window doing what it does. A **miss** in section
 A is a broken setup.
+
+## The arms were not searching at the same depth
+
+Found on question 7, the first question of the discriminating set, when both
+arms hit and arm M quoted a rule from line ~70 of an ~80-line system prompt —
+far past its 256-token window.
+
+The explanation is not that MiniLM saw it. `qdrant-mcp-official` was configured
+here with `QDRANT_SEARCH_LIMIT: "10"`, while `vector_find` defaults to
+`limit = 5`. The collection holds fourteen documents.
+
+| | candidates returned | share of a 14-document corpus |
+|---|---|---|
+| Arm M | 10 | 71% |
+| Arm N | 5 points, and chunks share documents — often 3–4 distinct ones | ~25% |
+
+At `k = 10` of 14, ranking barely has to work: the right document lands in the
+result set almost regardless of how well it was embedded. And the truncation
+only ever affected the *embedding* — Qdrant stores the full text in the payload,
+so once a document is returned the language model reads all of it. That is how a
+256-token model quoted line 70 exactly.
+
+Recall at different `k` is not a property of a model. It was a mistake in the
+setup, and it is mine: the limit was written into `qdrant-mcp-official.yaml`
+without checking what the other server defaults to.
+
+Sections A and B are unaffected — both arms hit everything, so no ranking
+information was at stake. Question 7 has to be re-run at equal depth, along with
+the rest of section C.
+
+The fix is to lower the official server to `QDRANT_SEARCH_LIMIT: "5"` rather
+than raise ours: it needs no prompt change, and a smaller `k` is the more
+demanding test of ranking.
+
+### A residual asymmetry, stated rather than fixed
+
+Equal `k` still does not make the arms equivalent. Arm N's five slots are
+*chunks*, and several chunks can belong to one document, so it may see fewer
+distinct documents than arm M does at the same number. This favours arm M and is
+not removed by matching the limit — it is inherent to comparing a chunking
+pipeline with one that does not chunk.
+
+### And the corpus is too small to settle anything
+
+Fourteen documents against twelve questions. ADR-0001's own standing benchmark
+rule asks for roughly 200 gold queries against roughly 10K distractors before a
+retrieval path is trusted, and this is three orders of magnitude short of that
+on both axes. Whatever comes out of these twelve questions is directional. It
+can reveal a broken pipeline — it already has, twice — but it cannot overturn
+ADR-0001 on its own, and the ADR entry should say so.
 
 ## What a result would mean
 

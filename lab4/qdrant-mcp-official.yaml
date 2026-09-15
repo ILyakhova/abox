@@ -45,7 +45,12 @@ spec:
       # choosing anything.
       EMBEDDING_PROVIDER: fastembed
       EMBEDDING_MODEL: sentence-transformers/all-MiniLM-L6-v2
-      QDRANT_SEARCH_LIMIT: "10"
+      # Matched to what vector_find defaults to in the other arm. It was "10",
+      # and with fourteen documents in the collection that returned 71% of the
+      # corpus as candidates -- at which point ranking barely has to work and
+      # the comparison measures nothing. Recall at unequal k is not a property
+      # of a model.
+      QDRANT_SEARCH_LIMIT: "5"
     resources:
       requests:
         cpu: 100m
