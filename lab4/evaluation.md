@@ -142,11 +142,35 @@ HTTP service.
 |---|---|---|
 | Where embedding happens | out-of-process, `llama-cpp-embeddings` | in-process, fastembed |
 | Memory limit that works | 256Mi | 2Gi (upstream records 256Mi being OOMKilled) |
-| Measured memory | | |
+| **Measured memory** | **53 MiB** | **510 MiB** |
 | First call | | 7914 ms |
 | Subsequent calls | | 3 ms |
 | Extra dependency | an embeddings service | none |
 
-The first call cost is the model being pulled from HuggingFace and loaded into
+Nearly ten times apart, and the 510 MiB explains the OOMKill upstream recorded:
+it is double the 256Mi limit that holds the other server comfortably.
+
+The comparison is not finished at that line, though, and reading it as "the
+official server costs 10× the memory" would be wrong. `qdrant-mcp` is small
+because it does not embed — it calls `llama-cpp-embeddings`, which has a
+footprint of its own that this column does not show:
+
+| | in-process | out-of-process |
+|---|---|---|
+| `qdrant-mcp-official` | 510 MiB | — |
+| `qdrant-mcp` | 53 MiB | + `llama-cpp-embeddings` (measure separately) |
+
+The real difference is not the total, it is **whether the cost amortises**. The
+in-process model is carried by every instance: a second MCP server, a third,
+an ingestion job, each pays its own 510 MiB. The out-of-process model is paid
+once and shared by every consumer — which is also what makes it a dependency
+that can be down, be a version behind, or be pointed at the wrong endpoint.
+
+At one consumer the in-process design is simpler and probably cheaper. The
+crossover comes with the second.
+
+The first-call cost is the model being pulled from HuggingFace and loaded into
 ONNX. It is paid once per pod start, which makes it a restart cost rather than
-a per-query one — worth stating plainly so it is not mistaken for latency.
+a per-query one — worth stating plainly so it is not mistaken for query
+latency. It does mean that after any restart the first user waits eight
+seconds, and on a cluster where pods move, that is not rare.
