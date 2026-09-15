@@ -156,29 +156,34 @@ A fork still needs the `oci_registry` override from the cluster runbook before `
 means anything: without it the cluster reconciles the upstream artifact and reports Ready
 while ignoring the fork's own releases entirely.
 
-### Preparation cost
+### Cost
 
-Recorded for planning purposes — what it cost to produce the four documents above.
+Recorded per day and cumulatively, for planning.
 
-Source material reviewed: the llama.cpp site, the `nomic-ai/nomic-embed-text-v1.5` and
-`-GGUF` model cards, the llama.cpp server reference, a write-up on Matryoshka embeddings
-for faster vector search, the llm-d architecture proposal, the agentgateway inference
-routing docs, and a Ukrainian-language case study on embedding selection for a legal-domain
-RAG system (the source of the benchmark rule in ADR-0001).
+| Date | Work | Tokens (approx.) |
+|---|---|---|
+| 2026-09-13 | Source material, ADR-0001 and ADR-0002, the runbooks, the local run that found the rope defect | 120,600 |
+| 2026-09-14 | Cluster deployment and verification, the egress blackhole, the upstream graph-RAG discovery, diagrams, correcting ADR-0002 | 127,400 |
+| 2026-09-15 | LAB4 — merging `feat/llmd-embeddings`, rebuild on Kubernetes 1.37, the official Qdrant MCP arm, the evaluation protocol | 88,000 |
+| | **Cumulative** | **~336,000** |
 
-| Stage | Tokens (approx.) |
-|---|---|
-| Repository familiarisation | 54,600 |
-| Reviewing source material — 6 page fetches, 4 searches | 32,900 |
-| Writing the ADRs, ToDos, and this changelog | 27,500 |
-| Verification — YAML validation via `yq`, cluster and git state | 5,600 |
-| **Total** | **~120,600** |
+Day one's figure breaks down as roughly 54,600 on reading the repository, 32,900 on source
+material (six page fetches and four searches), 27,500 on writing, and 5,600 on verification.
 
-Quota consumed on a Claude Pro plan: **16% of the 5-hour session budget, 11% of the 7-day
-budget.** Models used: Claude Sonnet 5 for repository familiarisation, Claude Opus 5 for
-the research and drafting.
+Source material reviewed on day one: the llama.cpp site, the `nomic-ai/nomic-embed-text-v1.5`
+and `-GGUF` model cards, the llama.cpp server reference, a write-up on Matryoshka embeddings
+for faster vector search, the llm-d architecture proposal, the agentgateway inference routing
+docs, and a Ukrainian-language case study on embedding selection for a legal-domain RAG
+system — the source of the benchmark rule in ADR-0001.
 
-The token figures are reconstructed from context-budget markers rather than billing, and
-the counter reset when the model was switched mid-task, so treat them as an estimate. The
-quota percentages are read directly from the client's usage panel and are the more reliable
-of the two.
+Day three is the cheapest of the three despite covering the most ground. Nothing was spent
+re-establishing where things live or what had already been decided.
+
+Models: Claude Sonnet 5 for the initial read of the repository, Claude Opus 5 for everything
+after.
+
+**On the figures.** They are reconstructed from context-budget markers, not billing, and the
+counter resets between turns, so each day is a sum of per-turn deltas rather than a reading
+off a meter. Treat them as ±10–15%. A quota reading taken partway through day one showed 16%
+of the 5-hour session budget and 11% of the 7-day budget on a Claude Pro plan; that is a
+point measurement, not a total, and is not comparable to the table above.
