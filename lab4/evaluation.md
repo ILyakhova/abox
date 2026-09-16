@@ -490,6 +490,32 @@ unreachable. And the ADR's own benchmark rule should be cited against this lab:
 twelve questions over fourteen documents is three orders of magnitude short of
 what that rule demands, so this is a signal, not a verdict.
 
+## Why two agents instead of one agent with its toolset swapped
+
+The task says to index the same data with the default Qdrant MCP by changing the
+toolset. This lab ran two agents side by side instead. Two reasons, and the
+second is the one that mattered.
+
+The obvious one is that `retrieval-agent` carries
+`kustomize.toolkit.fluxcd.io/name=releases`, so an edited toolset is reverted
+within the Kustomization's interval — possibly mid-run, silently.
+
+The one that turned out to matter: **swapping a toolset destroys the arm you
+just measured.** After the swap the first configuration no longer exists. You
+cannot re-ask a question, cannot check a result that looks wrong, and cannot
+re-run after fixing something.
+
+This lab needed exactly that, twice. Question 1 had to be re-asked after the
+`structuredContent` fix, and the whole of section C had to be re-run after the
+search depths were matched. With a single agent whose toolset had been swapped,
+both re-runs would have meant rebuilding the first configuration from memory and
+hoping it matched — and the `structuredContent` defect would probably never have
+been isolated at all, because there would have been no working arm to contrast
+the broken one against.
+
+What the task asks for is preserved: same corpus, same questions, two toolsets.
+They exist in parallel rather than in sequence.
+
 ## Who owns what
 
 Worth stating plainly, because two different upstreams are involved and the

@@ -7,11 +7,29 @@ spec:
   type: Declarative
   description: Ingests and retrieves data across a vector store and a graph.
   declarative:
-    # The ModelConfig the kagent chart creates, which every other agent here
-    # uses. It was gemini-gemini-2-5-flash, but that object was never shipped
-    # in releases/ -- it was created by hand and did not survive the cluster
-    # being rebuilt, leaving the agent stuck on ReconcileFailed.
-    modelConfig: default-model-config
+    # Was default-model-config, the ModelConfig the kagent chart creates. That
+    # object carries a placeholder OpenAI key, so every chat against this agent
+    # returned:
+    #
+    #   LLM error: STREAM_ERROR POST https://api.openai.com/v1/chat/completions:
+    #   401 Unauthorized ... "Incorrect API key provided: OPENAI_A**_KEY"
+    #
+    # while the kagent UI displayed "Gemini (gemini-3-5-flash)" in its header.
+    # The header is not evidence; the error is.
+    #
+    # Pointed at the ModelConfig the rest of this cluster actually uses --
+    # k8s-agent is already on it, and the LAB4 agents were built against it.
+    # It is a fork-local choice rather than a defect in the chart: upstream
+    # expects an OpenAI key to be supplied, and this cluster has a Gemini one.
+    #
+    # Note what this does and does not change. The running cluster reconciles
+    # the upstream OCI artifact, not this repository, so the value here does not
+    # reach it -- see the fork prerequisites in
+    # docs/todo/embeddings-cluster-sidecar-llmd.md. A manual patch would be
+    # reverted by the Kustomization within its interval. The demonstrable
+    # working version is lab4/retrieval-agent-nomic.yaml, which is this agent
+    # on this ModelConfig, applied outside Flux.
+    modelConfig: gemini-gemini-3-5-flash
     stream: true
     systemMessage: |
       You are a data agent over two stores in this cluster. Which products
