@@ -58,6 +58,29 @@ spec:
       image:
         tag: "2026-09-16"
 
+      # A snapshot is gzip over gob, so anyone who can pull the maps image can
+      # `strings` every node's text -- for a catalog map that is people's names
+      # and roles. Maps built with `-snapshot-recipient age1...` are
+      # age-encrypted instead: same file names, same image layout, and only the
+      # server needs the identity to open them.
+      #
+      # The identity is cluster state, not a release artifact -- it is not in
+      # this repo and never will be. Create it in the cluster before the pod
+      # first schedules, or the Secret volume leaves it in ContainerCreating:
+      #
+      #   kubectl create namespace xray-memory
+      #   kubectl -n xray-memory create secret generic xray-memory-snapshot-key \
+      #     --from-file=identity=$HOME/.config/xray-memory/snapshot.key
+      #
+      # secretKey (identity) and mountPath are chart defaults; the server reads
+      # the file from $XRAY_SNAPSHOT_KEY. A directory may mix encrypted and
+      # plaintext maps -- an encrypted map found with no key is skipped with a
+      # warning and the rest still serve, so a missing key degrades to fewer
+      # maps, not a crash.
+      encryption:
+        enabled: true
+        secretName: xray-memory-snapshot-key
+
     # Query embedding comes from an in-pod llama.cpp sidecar, not from a shared
     # endpoint. model/dims/maxInputChars are the snapshot FINGERPRINT -- every
     # map served must have been built with the same three -- and the sidecar is
