@@ -1,0 +1,93 @@
+# xray-memory: a code graph and semantic memory served over MCP, from pre-built
+# snapshots. Three artifacts move together here:
+#
+#   server image  ghcr.io/den-vasyliev/abox/xray-memory:v1.23.66-61e4eaa
+#   chart         oci://ghcr.io/den-vasyliev/abox/charts/xray-memory:0.6.0
+#   maps image    ghcr.io/den-vasyliev/abox/xray-memory-maps:2026-09-16
+#
+# The chart runs the server in SNAPSHOT mode (`serve-snapshots`): one graph and
+# index per map, loaded lazily from a pre-built <label>.graph.gob.gz. Live mode
+# parses source on the node and is a workstation mode; the chart does not
+# template it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: xray-memory
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: xray-memory
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/den-vasyliev/abox/charts/xray-memory
+  ref:
+    tag: "0.6.0"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: xray-memory
+  namespace: xray-memory
+spec:
+  interval: 1h
+  releaseName: xray-memory
+  chartRef:
+    kind: OCIRepository
+    name: xray-memory
+    namespace: flux-system
+  install:
+    createNamespace: true
+  values:
+    # image.tag is deliberately unset: the chart defaults it to .Chart.AppVersion,
+    # which is v1.23.66-61e4eaa on chart 0.6.0. Chart and server image move as
+    # one artifact, so pinning the tag here would only let them drift.
+
+    # The maps are mounted as an OCI IMAGE VOLUME (source: image, the chart
+    # default) -- the kubelet pulls the image and mounts its filesystem
+    # read-only into the pod. No initContainer, no copy, and the maps image can
+    # be FROM scratch. ImageVolume is beta and on by default from Kubernetes
+    # 1.33; the chart's kubeVersion refuses anything older and bootstrap/
+    # variables.tf pins the node image at v1.37.0.
+    #
+    # The tag has to be pinned: the chart defaults it to `latest`, and an image
+    # volume is resolved when the pod is created, so a moved tag is only picked
+    # up on pod recreation.
+    snapshots:
+      image:
+        tag: "2026-09-16"
+
+    # Query embedding. model/dims/maxInputChars are the snapshot FINGERPRINT --
+    # every map served must have been built with the same three -- so only the
+    # endpoint is overridden here, to abox's standalone llama.cpp embedder
+    # (releases/llama-cpp-embeddings.yaml). That is the same nomic-embed-text
+    # GGUF, and the same image, that embedded the cells these maps were built
+    # from.
+    #
+    # dims 256 is a CLIENT-side Matryoshka truncation in the server: llama.cpp
+    # returns nomic's native 768 either way, and 256 is the knee every shipped
+    # snapshot was built at. It is the hard check -- a mismatch skips the map at
+    # load.
+    #
+    # No dependsOn: the server dials the endpoint lazily, so it starts and
+    # reports healthy without it and only searches fail until llama.cpp is up.
+    embeddings:
+      endpoint: http://llama-cpp-embeddings.llama-cpp:8090
+
+    # Left at the chart defaults, spelled out because they are the interesting
+    # ones:
+    #
+    #   server.writable false     the snapshot directory is an immutable image
+    #                             volume; update_code_graph is refused and
+    #                             `remember` registers no tool. Writing needs
+    #                             snapshots.source pvc or ephemeral.
+    #   service           ClusterIP :8085
+    #   ingress.enabled   false
+    #
+    # Every endpoint the server exposes -- /mcp, /ui, /search, /graph, /node,
+    # /status, /metrics -- is unauthenticated and read-only, so it stays
+    # cluster-internal: no HTTPRoute onto agentgateway-external, unlike the
+    # embeddings backends.
+    #
+    #   in-cluster MCP: http://xray-memory.xray-memory:8085/mcp
