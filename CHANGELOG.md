@@ -218,6 +218,40 @@ which would have turned the comparison into GPT against Gemini had the key
 worked; and the two pipelines differ in chunking as well as in model, which the
 results cannot separate.
 
+- **ADR-0003 — retrieval architecture**
+  ([docs/adr/0003-retrieval-architecture.md](docs/adr/0003-retrieval-architecture.md)).
+  Keeps both stores and records why, from measurement rather than assumption. A second
+  LAB4 experiment held everything constant between two agents and varied only whether the
+  Neo4j tools were present: same model, same collection, same retrieval discipline, six
+  relationship-shaped questions.
+
+  The graph-equipped arm was exact on five of six. The vector-only arm was exact on one and
+  **wrong on two — confidently both times**, citing metadata and flagging nothing. That is
+  the structural finding: vector search answers *how many of these are among the documents
+  I retrieved* and presents it as *how many there are*. Asked how many agents use a given
+  ModelConfig it said two, where the answer is four.
+
+  The cost difference is the concrete result: **62,454 tokens against 1,178,890** on one
+  question and **33,448 against 2,313,311** on another, in both cases for an answer that
+  was no better and once worse. Vector retrieval pays for the volume of text it must read;
+  the graph pays once, at ingest, for structure.
+
+  The counterweight is recorded too. Asked what two agents have in common, the vector-only
+  arm read both manifests and produced a correct detailed comparison from a single search.
+  At fourteen documents the language model does the graph's work itself — while the text
+  fits, and the figures above are what fitting costs.
+
+  The shipped design's store-selection rule — an instruction in the system prompt, enforced
+  by nothing — held six times out of six. That was the open question about the design.
+
+  The ADR also creates work rather than only recording a decision. The two stores were
+  observed to have **drifted**: the collection still described an agent's configuration as
+  it had been hours earlier, and no vector hit carries an age. Combined with vector storage
+  not being idempotent — the ingest produced fifteen documents for fourteen objects —
+  re-indexing is an event to be avoided rather than a routine, which is what causes the
+  drift in the first place. A content hash on `vector_store` and a single ingest path that
+  populates both stores together are the remedies named.
+
 ### Cost
 
 Recorded per day and cumulatively, for planning.
@@ -228,7 +262,8 @@ Recorded per day and cumulatively, for planning.
 | 2026-09-14 | Cluster deployment and verification, the egress blackhole, the upstream graph-RAG discovery, diagrams, correcting ADR-0002 | 127,400 |
 | 2026-09-15 | LAB4 — merging `feat/llmd-embeddings`, rebuild on Kubernetes 1.37, the official Qdrant MCP arm, the evaluation protocol | 88,000 |
 | 2026-09-15 (evening) | Running LAB4: the `structuredContent` defect, the search-depth correction, twelve questions through two agents, ADR-0001 corrected | 68,000 |
-| | **Cumulative** | **~404,000** |
+| 2026-09-16 | Closing the task list, the graph arm, six relationship questions, ADR-0003 | 47,000 |
+| | **Cumulative** | **~451,000** |
 
 Day one's figure breaks down as roughly 54,600 on reading the repository, 32,900 on source
 material (six page fetches and four searches), 27,500 on writing, and 5,600 on verification.
