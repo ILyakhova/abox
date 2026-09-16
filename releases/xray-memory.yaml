@@ -44,19 +44,47 @@ spec:
     # which is v1.23.66-61e4eaa on chart 0.6.0. Chart and server image move as
     # one artifact, so pinning the tag here would only let them drift.
 
-    # The maps are mounted as an OCI IMAGE VOLUME (source: image, the chart
-    # default) -- the kubelet pulls the image and mounts its filesystem
-    # read-only into the pod. No initContainer, no copy, and the maps image can
-    # be FROM scratch. ImageVolume is beta and on by default from Kubernetes
-    # 1.33; the chart's kubeVersion refuses anything older and bootstrap/
-    # variables.tf pins the node image at v1.37.0.
-    #
-    # The tag has to be pinned: the chart defaults it to `latest`, and an image
-    # volume is resolved when the pod is created, so a moved tag is only picked
-    # up on pod recreation.
+    # The server edits a worked copy of each map and flushes it back, so
+    # update_code_graph is accepted and `remember` registers a tool that writes
+    # into the `session` map (server.memoryMap). That needs a volume it can
+    # write to: the chart refuses writable=true with snapshots.source=image
+    # outright, because an image volume is a read-only mount and nothing written
+    # there lands anywhere.
+    server:
+      writable: true
+
     snapshots:
-      image:
-        tag: "2026-09-16"
+      # pvc, not ephemeral. An emptyDir is empty at every pod start, so the
+      # worked copies and everything `remember` wrote are lost on any restart,
+      # reschedule or rollout -- session notes, not a store. A claim keeps them.
+      # KinD's local-path provisioner is the default StorageClass; size (5Gi),
+      # accessModes (RWO) and the empty storageClass are chart defaults.
+      #
+      # The claim still dies with the CLUSTER: Docker's data-root is under /tmp
+      # on Codespaces, so a restart takes local-path's volumes with it, exactly
+      # as it does Qdrant's.
+      source: pvc
+
+      # With source=pvc the maps no longer arrive as the volume itself, so a
+      # fresh claim is seeded from the maps image: it is mounted as an image
+      # volume and an initContainer copies every *.graph.gob.gz across, ONLY for
+      # files the volume does not already hold. overwrite stays false (the chart
+      # default) so a redeploy cannot erase a worked copy or the notes.
+      #
+      # ImageVolume is beta and on by default from Kubernetes 1.33; the chart's
+      # kubeVersion refuses anything older and bootstrap/variables.tf pins the
+      # node image at v1.37.0.
+      #
+      # The tag is pinned rather than `latest` because an image volume is
+      # resolved when the pod is created, so a moved tag would only be picked up
+      # on pod recreation -- and here it would land as new files beside the old
+      # ones rather than replacing them.
+      seed:
+        enabled: true
+        images:
+          - reference: ghcr.io/den-vasyliev/abox/xray-memory-maps:2026-09-16
+            pullPolicy: IfNotPresent
+            path: /maps
 
       # A snapshot is gzip over gob, so anyone who can pull the maps image can
       # `strings` every node's text -- for a catalog map that is people's names
@@ -77,6 +105,14 @@ spec:
       # plaintext maps -- an encrypted map found with no key is skipped with a
       # warning and the rest still serve, so a missing key degrades to fewer
       # maps, not a crash.
+      #
+      # The key reads, the recipient writes. Now that the server flushes, a map
+      # that arrived encrypted is re-encrypted on every flush and is never
+      # downgraded -- but the `session` notes map is created here, so it is
+      # written PLAINTEXT onto the claim. To encrypt those too, set
+      # XRAY_SNAPSHOT_RECIPIENT (extraEnv) to the identity's age1... public key,
+      # which `age-keygen -y snapshot.key` prints from the file the Secret was
+      # made from.
       encryption:
         enabled: true
         secretName: xray-memory-snapshot-key
@@ -124,16 +160,16 @@ spec:
     # Left at the chart defaults, spelled out because they are the interesting
     # ones:
     #
-    #   server.writable false     the snapshot directory is an immutable image
-    #                             volume; update_code_graph is refused and
-    #                             `remember` registers no tool. Writing needs
-    #                             snapshots.source pvc or ephemeral.
+    #   server.memoryMap  session   the map `remember` writes into, created on
+    #                               first use as <mountPath>/session.graph.gob.gz
+    #                               and flushed after every note.
+    #   server.skillsMap  skills    backs list_skills / get_skill.
     #   service           ClusterIP :8085
     #   ingress.enabled   false
     #
     # Every endpoint the server exposes -- /mcp, /ui, /search, /graph, /node,
-    # /status, /metrics -- is unauthenticated and read-only, so it stays
-    # cluster-internal: no HTTPRoute onto agentgateway-external, unlike the
-    # embeddings backends.
+    # /status, /metrics -- is unauthenticated, and the writes above go through
+    # /mcp with no auth in front of them, so it stays cluster-internal: no
+    # HTTPRoute onto agentgateway-external, unlike the embeddings backends.
     #
     #   in-cluster MCP: http://xray-memory.xray-memory:8085/mcp
