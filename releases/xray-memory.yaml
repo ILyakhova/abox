@@ -58,22 +58,45 @@ spec:
       image:
         tag: "2026-09-16"
 
-    # Query embedding. model/dims/maxInputChars are the snapshot FINGERPRINT --
-    # every map served must have been built with the same three -- so only the
-    # endpoint is overridden here, to abox's standalone llama.cpp embedder
-    # (releases/llama-cpp-embeddings.yaml). That is the same nomic-embed-text
-    # GGUF, and the same image, that embedded the cells these maps were built
-    # from.
+    # Query embedding comes from an in-pod llama.cpp sidecar, not from a shared
+    # endpoint. model/dims/maxInputChars are the snapshot FINGERPRINT -- every
+    # map served must have been built with the same three -- and the sidecar is
+    # what makes that one pod's property instead of something to keep in step
+    # with another release. embeddings.endpoint is ignored while this is on; the
+    # server is pointed at localhost.
     #
-    # dims 256 is a CLIENT-side Matryoshka truncation in the server: llama.cpp
+    # The chart renders it as a NATIVE sidecar (initContainer with
+    # restartPolicy: Always), so the kubelet starts it first and waits for its
+    # startupProbe before the server container starts: the first search never
+    # races the model load.
+    #
+    # dims 256 is a CLIENT-side Matryoshka truncation in the server -- llama.cpp
     # returns nomic's native 768 either way, and 256 is the knee every shipped
-    # snapshot was built at. It is the hard check -- a mismatch skips the map at
-    # load.
-    #
-    # No dependsOn: the server dials the endpoint lazily, so it starts and
-    # reports healthy without it and only searches fail until llama.cpp is up.
+    # snapshot was built at. It is the hard check: a mismatch skips the map at
+    # load, and the chart refuses the sidecar outright at any other dims unless
+    # allowOtherDims is set.
     embeddings:
-      endpoint: http://llama-cpp-embeddings.llama-cpp:8090
+      sidecar:
+        enabled: true
+        # Required when enabled -- the chart names no registry and guesses no
+        # public image. This is abox's own embedder image, the one
+        # releases/llama-cpp-embeddings.yaml runs: a llama.cpp server base with
+        # nomic-embed-text-v1.5 GGUF baked at /models/model.gguf, which is the
+        # chart's default modelPath. Baked means nothing is fetched from
+        # HuggingFace at pod start, which matters on Codespaces where egress is
+        # broken until `make fix-egress` runs.
+        #
+        # amd64 ONLY -- a single manifest, not an index. It will not run
+        # natively on an arm64 node.
+        image: ghcr.io/den-vasyliev/abox/nomic-embed:v1.18.1-4ccc0ff
+        # port, modelPath, extraArgs (--ctx-size 16384 --ubatch-size 2048
+        # --parallel 8), the 60s startup budget and the resources are all left
+        # at the chart defaults: they are the same production embedder sidecar
+        # the standalone Deployment was copied from, down to the 500m request.
+    #
+    # This drops the only cross-release dependency xray-memory had. It no longer
+    # needs releases/llama-cpp-embeddings.yaml to be up, or to be serving the
+    # same GGUF it was serving when the maps were built.
 
     # Left at the chart defaults, spelled out because they are the interesting
     # ones:
