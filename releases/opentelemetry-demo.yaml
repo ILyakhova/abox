@@ -38,6 +38,12 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: otel-demo
+  # Scopes this namespace into the triage agent (cluster mode) as tenant
+  # otel-demo. Declared here because the releases Kustomization prunes
+  # annotations added by hand on its next reconcile.
+  annotations:
+    triage/tenant: otel-demo
+    triage/virtual-app-identity: workload
 ---
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: HelmRepository
