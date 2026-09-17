@@ -42,6 +42,9 @@ resource "kubectl_manifest" "rsip" {
       url: ${var.oci_registry}/${var.releases_artifact}
       filter:
         includeTag: "^\\d+\\.\\d+\\.\\d+$"
+        # Without semver the tags sort in reverse alphabetical order, which
+        # ranks 0.9.9 above 0.9.10.
+        semver: ">=0.0.0"
         limit: 1
       defaultValues:
         tag: "${var.releases_version}"
