@@ -2,9 +2,7 @@
 #
 # The reference microservices app the OTel project ships to exercise traces,
 # metrics and logs end to end. Chart bundles its own backends as subcharts
-# (jaeger, prometheus, grafana, opensearch) -- all `enabled: true` by default,
-# so this is a plain install with no values overrides, matching the docs'
-# `helm install my-otel-demo open-telemetry/opentelemetry-demo` exactly.
+# (jaeger, prometheus, grafana, opensearch) -- all `enabled: true` by default.
 #
 # HTTP Helm repo, like qdrant/neo4j/llm-d -- the chart is not published to an
 # OCI registry, so this is chart.spec + HelmRepository, not chartRef.
@@ -16,11 +14,26 @@
 # jaeger/grafana subpaths behind it are not written to tolerate being
 # reachable under a further prefix (a gateway URLRewrite only rewrites the
 # inbound request path, not the absolute asset paths the frontend serves).
-# Access is via the docs' own default instead:
+# Its routing is baked into the frontend-proxy image itself too -- there is
+# no envoy config in this chart to add a path to even for in-cluster access.
+# Access is via the docs' own default instead (Service names are the bare
+# component name here, not release-prefixed):
 #
-#   kubectl port-forward -n otel-demo svc/opentelemetry-demo-frontend-proxy 8080:8080
+#   kubectl port-forward -n otel-demo svc/frontend-proxy 8080:8080
 #
-# then http://localhost:8080 for the web store, /jaeger/ui, /grafana, /loadgen.
+# then http://localhost:8080/ for the web store, /chatbot/, /jaeger/ui/,
+# /grafana/, /telemetry/, /feature/ -- the exact list the chart's own
+# post-install NOTES.txt prints. No /loadgen: the chart's default
+# component.load-generator.env pins LOCUST_HEADLESS: "true", unlike
+# docker-compose's LOCUST_HEADLESS=false, so upstream's screenshots of a
+# Locust UI are docker-compose-only unless overridden. Overridden here via
+# envOverrides (merged onto the chart's env by name, not a wholesale
+# replacement -- see the chart's otel-demo.envOverriden helper) plus a
+# service.port so the chart renders a Service at all (load-generator gets
+# none by default: no .service block, no .ports). Locust's own default web
+# port is 8089, unset here same as upstream, so the two line up:
+#
+#   kubectl port-forward -n otel-demo svc/load-generator 8089:8089
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -53,3 +66,11 @@ spec:
         namespace: flux-system
   install:
     createNamespace: true
+  values:
+    components:
+      load-generator:
+        envOverrides:
+          - name: LOCUST_HEADLESS
+            value: "false"
+        service:
+          port: 8089
