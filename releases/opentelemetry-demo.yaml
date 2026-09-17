@@ -1,0 +1,55 @@
+# OpenTelemetry Demo -- https://opentelemetry.io/docs/demo/kubernetes-deployment/
+#
+# The reference microservices app the OTel project ships to exercise traces,
+# metrics and logs end to end. Chart bundles its own backends as subcharts
+# (jaeger, prometheus, grafana, opensearch) -- all `enabled: true` by default,
+# so this is a plain install with no values overrides, matching the docs'
+# `helm install my-otel-demo open-telemetry/opentelemetry-demo` exactly.
+#
+# HTTP Helm repo, like qdrant/neo4j/llm-d -- the chart is not published to an
+# OCI registry, so this is chart.spec + HelmRepository, not chartRef.
+#
+# Not wired onto agentgateway-external. frontend-proxy (the chart's single
+# envoy entrypoint, fronting the web UI, jaeger UI, grafana and flagd UI) is
+# built to own the root path -- kagent.yaml already claims "/" on that
+# listener for its own UI, and frontend-proxy's Next.js frontend and the
+# jaeger/grafana subpaths behind it are not written to tolerate being
+# reachable under a further prefix (a gateway URLRewrite only rewrites the
+# inbound request path, not the absolute asset paths the frontend serves).
+# Access is via the docs' own default instead:
+#
+#   kubectl port-forward -n otel-demo svc/opentelemetry-demo-frontend-proxy 8080:8080
+#
+# then http://localhost:8080 for the web store, /jaeger/ui, /grafana, /loadgen.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: otel-demo
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: HelmRepository
+metadata:
+  name: open-telemetry
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: https://open-telemetry.github.io/opentelemetry-helm-charts
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: opentelemetry-demo
+  namespace: otel-demo
+spec:
+  interval: 1h
+  releaseName: opentelemetry-demo
+  chart:
+    spec:
+      chart: opentelemetry-demo
+      version: "0.41.2"
+      sourceRef:
+        kind: HelmRepository
+        name: open-telemetry
+        namespace: flux-system
+  install:
+    createNamespace: true

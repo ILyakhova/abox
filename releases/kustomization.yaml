@@ -10,6 +10,7 @@ resources:
   - llmd.yaml
   - mcp-servers.yaml
   - neo4j.yaml
+  - opentelemetry-demo.yaml
   - phoenix.yaml
   - qdrant.yaml
   - xray-memory.yaml
