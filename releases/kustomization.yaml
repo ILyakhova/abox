@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - agentgateway.yaml
+  - agentgateway-llm.yaml
   - agentregistry.yaml
   - agent-retrieval.yaml
   - kagent.yaml
