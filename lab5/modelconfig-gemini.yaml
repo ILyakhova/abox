@@ -1,0 +1,29 @@
+# LAB5 — a ModelConfig that actually has a key.
+#
+# The kagent chart ships `default-model-config`, pointed at OpenAI with a
+# placeholder, and every agent in a fresh cluster inherits it. Chats against
+# those agents return:
+#
+#   LLM error: STREAM_ERROR POST https://api.openai.com/v1/chat/completions:
+#   401 Unauthorized ... "Incorrect API key provided: OPENAI_A**_KEY"
+#
+# while the kagent UI header still reads "Gemini". The header is not evidence.
+#
+# The Secret is NOT in this file and must not be: create it from your own key
+# before applying this, or the ModelConfig reconciles to Accepted and the agent
+# still fails at the first message.
+#
+#   kubectl -n kagent create secret generic gemini-gemini-3-5-flash \
+#     --from-literal=GEMINI_API_KEY=<your key>
+---
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: gemini-gemini-3-5-flash
+  namespace: kagent
+spec:
+  provider: Gemini
+  model: gemini-3.5-flash
+  apiKeySecret: gemini-gemini-3-5-flash
+  apiKeySecretKey: GEMINI_API_KEY
+  gemini: {}

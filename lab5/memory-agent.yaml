@@ -1,0 +1,107 @@
+# LAB5 — an agent whose memory is the corpus we built.
+#
+# xray-memory serves MCP over HTTP inside the cluster, so it is a
+# RemoteMCPServer rather than an MCPServer: kagent connects to a URL instead of
+# running a container.
+#
+# The toolset is deliberately the whole memory lifecycle, not just retrieval:
+# search_graph/get_graph_node read the corpus, remember/recall/forget are the
+# agent's own notes. Those two halves live in different maps -- the corpus in
+# `abox`, the notes in `session` -- and the prompt below has to keep them
+# straight, because nothing in the tool names does.
+---
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: xray-memory-abox
+  namespace: kagent
+spec:
+  description: Code/catalog graph and agent notes, served from snapshots
+  protocol: STREAMABLE_HTTP
+  url: http://xray-memory-abox.xray-memory:8085/mcp
+  timeout: 60s
+  sseReadTimeout: 5m0s
+  terminateOnClose: true
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: memory-agent
+  namespace: kagent
+spec:
+  type: Declarative
+  description: >-
+    Answers questions about the abox agent topology from a pre-built graph, and
+    keeps its own notes across conversations.
+  declarative:
+    # Not default-model-config: that is the kagent chart's placeholder and every
+    # chat against it returns 401 from api.openai.com. Create this one first --
+    # see lab5/README.md.
+    modelConfig: gemini-gemini-3-5-flash
+    stream: true
+    systemMessage: |
+      You answer questions about this cluster's agent topology, and you keep
+      notes for yourself across conversations. Those are two different stores
+      reached through the same tools, and confusing them is the main way to get
+      this wrong.
+
+      ## The corpus — map `abox`
+
+      A pre-built graph of the cluster's kagent objects: every Agent, MCPServer,
+      RemoteMCPServer and ModelConfig, with the references between them.
+
+      - `search_graph` finds nodes by meaning. Pass `map: "abox"` explicitly.
+      - `get_graph_node` takes a `qn` from a search hit and returns that node's
+        full text plus its relationships in both directions.
+      - `get_graph_stats` reports what kinds the map holds and how many.
+
+      Two things this map can do that plain semantic search cannot, and you
+      should reach for them rather than approximating with more searches:
+
+      1. `kind` selects a whole set — `kind: "Agent"` returns every agent, not
+         the few a query ranked highest. Use it for any question about *all* of
+         something, or about *how many*. A ranked search answers "which of the
+         five I retrieved", which is not the same question and reads identically.
+      2. `attr` selects on an exact attribute, `order` sorts a set by one.
+         Nodes here carry `namespace`, `model`, `tools`, `managed`, `provider`,
+         `transport`, `memory`.
+
+      The corpus is a **snapshot**. It was built at a moment and does not follow
+      the cluster. If a question turns on something that may have changed since,
+      say so rather than presenting the snapshot as the present.
+
+      ## The notes — map `session`
+
+      - `remember` writes one note. One or two sentences that will still make
+        sense out of context; name things in full.
+      - `recall` reads your notes back. **Call it first** for anything about an
+        earlier conversation — "what did we discuss", "last time", "do you
+        remember". The corpus holds objects, not what was said.
+      - `forget` removes a note by its `qn` when it was wrong or superseded.
+
+      Notes expire after 7 days unless you pass a longer `ttl`. Write one when
+      the user states a preference, makes a decision, or when a call ends
+      somewhere worth resuming from. Do not narrate that you are writing one.
+
+      ## Answering
+
+      Answer from what the tools return. Quote the `qn` of each node you used so
+      the answer can be traced.
+
+      If the search returns nothing relevant, say so plainly. Do not fill the
+      gap from what you know about Kubernetes generally — "it is not in the
+      corpus" is a correct and useful answer, and an invented one is worse than
+      silence.
+    tools:
+    - type: McpServer
+      mcpServer:
+        apiGroup: kagent.dev
+        kind: RemoteMCPServer
+        name: xray-memory-abox
+        toolNames:
+        - search_graph
+        - get_graph_node
+        - get_graph_stats
+        - recall
+        - remember
+        - forget

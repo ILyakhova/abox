@@ -1,0 +1,106 @@
+# LAB5 — xray-memory serving a corpus we built ourselves.
+#
+# Named xray-memory-abox rather than xray-memory, and with its own OCIRepository,
+# so it cannot collide with releases/xray-memory.yaml when a v* tag is finally
+# cut from feat/xray-memory and the artifact stops being empty. Nothing in this
+# directory ships; the cluster reconciles the upstream artifact.
+#
+# Three differences from releases/xray-memory.yaml, and each one is the point of
+# the exercise rather than a simplification:
+#
+#   seed image     abox-maps:lab5, built here, not the shipped maps image
+#   encryption     off -- our snapshot is plaintext, see the note below
+#   everything else identical, deliberately: same chart, same server image, same
+#                  sidecar, same 256-dim fingerprint
+#
+# The shipped maps could not be used at all: both xray.graph.gob.gz and
+# harness.graph.gob.gz are age-encrypted (`file` reports "age encrypted file,
+# X25519 recipient"), the identity is cluster state that is not in this repo, and
+# an encrypted map found with no key is skipped at load. Serving them would have
+# meant serving nothing.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: xray-memory
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: OCIRepository
+metadata:
+  name: xray-memory-abox
+  namespace: flux-system
+spec:
+  interval: 1h
+  url: oci://ghcr.io/den-vasyliev/abox/charts/xray-memory
+  ref:
+    tag: "0.6.0"
+---
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: xray-memory-abox
+  namespace: xray-memory
+spec:
+  interval: 1h
+  releaseName: xray-memory-abox
+  chartRef:
+    kind: OCIRepository
+    name: xray-memory-abox
+    namespace: flux-system
+  install:
+    createNamespace: true
+    # The kagent release stalled on exactly this: the controller waited on
+    # postgres, Helm timed out, retries were 0, and the release stayed Failed
+    # long after the workload became healthy. A model load behind a startupProbe
+    # is the same shape of race, so give it room and let it retry.
+    timeout: 10m
+    remediation:
+      retries: 2
+  values:
+    server:
+      # Enables the `remember` tool, which writes notes into the `session` map.
+      # This is what makes it memory rather than an index, and it is what LAB5
+      # item 4 -- the full memory lifecycle -- exercises.
+      writable: true
+
+    snapshots:
+      # pvc, not the image volume directly: an image volume is read-only, and a
+      # writable server needs somewhere to flush the worked copy and the session
+      # notes. The claim outlives pod restarts; it does not outlive the cluster.
+      source: pvc
+      seed:
+        enabled: true
+        images:
+          # Built by lab5/README.md from the live cluster's own topology and
+          # side-loaded with `kind load docker-image`, so IfNotPresent is
+          # required -- Always would send the kubelet to Docker Hub for a tag
+          # that exists only on these nodes.
+          - reference: docker.io/library/abox-maps:lab5
+            pullPolicy: IfNotPresent
+            path: /maps
+
+      # Off, and the reason is about this corpus rather than about the feature.
+      # The shipped maps are encrypted because a catalog map carries people's
+      # names and roles, and a snapshot is gzip over gob -- anyone who can pull
+      # the image can `strings` it. Ours is the cluster's own agent topology:
+      # object names and the references between them, all of it readable with
+      # `kubectl get` by anyone who can reach the cluster at all. Encrypting it
+      # would protect nothing and would add an identity to manage.
+      #
+      # Note what this does NOT stay true for: the `session` map. `remember`
+      # writes whatever an agent is told to remember, which is the one place in
+      # this deployment where content is not already public. If notes start
+      # carrying anything sensitive, set XRAY_SNAPSHOT_RECIPIENT and turn this
+      # back on -- the decision belongs to the notes, not to the corpus.
+      encryption:
+        enabled: false
+
+    embeddings:
+      sidecar:
+        enabled: true
+        # The same embedder image the map was BUILT with. That is not a
+        # preference: model, dims and maxInputChars are the snapshot's
+        # fingerprint, and a mismatch makes the server skip the map at load
+        # rather than answer badly. Built at nomic / 256 / 8192, which are the
+        # chart's defaults, so nothing below has to be overridden.
+        image: ghcr.io/den-vasyliev/abox/nomic-embed:v1.18.1-4ccc0ff
