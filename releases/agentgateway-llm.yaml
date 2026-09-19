@@ -1,0 +1,95 @@
+# Standalone agentgateway for LLM providers, model routes, policies and MCP
+# targets, edited through its own admin UI. The controller-managed
+# agentgateway-external proxy gets its config over xDS from CRDs, so its UI is
+# read-only; this one runs from a local file, and a save in the UI writes the
+# file and hot-reloads it.
+#
+# The file lives on a PVC. The seed ConfigMap is copied only when the file is
+# missing, so Flux never overwrites what was saved in the UI.
+#
+# The admin port (15000) has no auth and can rewrite the config, including
+# provider keys. Reach it with port-forward only; never route it:
+#   kubectl -n agentgateway-system port-forward svc/agentgateway-llm 15000
+#   open http://localhost:15000/ui
+#
+# LLM traffic: http://agentgateway-llm.agentgateway-system.svc.cluster.local
+# (Service port 80 -> bind 8080, once a bind on 8080 is configured).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentgateway-llm-seed
+  namespace: agentgateway-system
+data:
+  config.yaml: |
+    config:
+      adminAddr: 0.0.0.0:15000
+    binds: []
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agentgateway-llm-config
+  namespace: agentgateway-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 64Mi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentgateway-llm
+  namespace: agentgateway-system
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: agentgateway-llm
+  template:
+    metadata:
+      labels:
+        app: agentgateway-llm
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+      initContainers:
+        - name: seed
+          image: busybox:1.36
+          command: ["sh", "-c", "[ -s /config/config.yaml ] || cp /seed/config.yaml /config/config.yaml"]
+          volumeMounts:
+            - {name: config, mountPath: /config}
+            - {name: seed, mountPath: /seed}
+      containers:
+        - name: agentgateway
+          image: cr.agentgateway.dev/agentgateway:v1.5.0
+          args: ["-f", "/config/config.yaml"]
+          ports:
+            - {name: llm, containerPort: 8080}
+            - {name: admin, containerPort: 15000}
+          volumeMounts:
+            - {name: config, mountPath: /config}
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: agentgateway-llm-config
+        - name: seed
+          configMap:
+            name: agentgateway-llm-seed
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentgateway-llm
+  namespace: agentgateway-system
+spec:
+  selector:
+    app: agentgateway-llm
+  ports:
+    - {name: llm, port: 80, targetPort: llm}
+    - {name: admin, port: 15000, targetPort: admin}

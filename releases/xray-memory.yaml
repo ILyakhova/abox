@@ -1,8 +1,8 @@
 # xray-memory: a code graph and semantic memory served over MCP, from pre-built
 # snapshots. Three artifacts move together here:
 #
-#   server image  ghcr.io/den-vasyliev/abox/xray-memory:v1.23.66-61e4eaa
-#   chart         oci://ghcr.io/den-vasyliev/abox/charts/xray-memory:0.6.0
+#   server image  ghcr.io/den-vasyliev/abox/xray-memory:v1.23.73-df0cf10
+#   chart         oci://ghcr.io/den-vasyliev/abox/charts/xray-memory:0.6.3
 #   maps image    ghcr.io/den-vasyliev/abox/xray-memory-maps:2026-09-16
 #
 # The chart runs the server in SNAPSHOT mode (`serve-snapshots`): one graph and
@@ -23,7 +23,7 @@ spec:
   interval: 1h
   url: oci://ghcr.io/den-vasyliev/abox/charts/xray-memory
   ref:
-    tag: "0.6.0"
+    tag: "0.6.3"
 ---
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -41,8 +41,9 @@ spec:
     createNamespace: true
   values:
     # image.tag is deliberately unset: the chart defaults it to .Chart.AppVersion,
-    # which is v1.23.66-61e4eaa on chart 0.6.0. Chart and server image move as
-    # one artifact, so pinning the tag here would only let them drift.
+    # which is v1.23.73-df0cf10 on chart 0.6.3. Chart and server image move as
+    # one artifact, so pinning the tag here would only let them drift -- 0.6.0
+    # to 0.6.3 changed nothing but that appVersion and the labels carrying it.
 
     # The server edits a worked copy of each map and flushes it back, so
     # update_code_graph is accepted and `remember` registers a tool that writes

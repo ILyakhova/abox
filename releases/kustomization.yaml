@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - agentgateway.yaml
+  - agentgateway-llm.yaml
   - agentregistry.yaml
   - agent-retrieval.yaml
   - embeddings.yaml
@@ -11,6 +12,8 @@ resources:
   - llmd.yaml
   - mcp-servers.yaml
   - neo4j.yaml
+  - ngrok-operator.yaml
+  - opentelemetry-demo.yaml
   - phoenix.yaml
   - qdrant.yaml
   - xray-memory.yaml
