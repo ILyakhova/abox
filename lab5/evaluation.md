@@ -14,6 +14,83 @@ between them. That makes this a third arm beside the two already measured in
 | G | Qdrant + Neo4j | LAB4 |
 | **X** | **xray-memory snapshot** | **here** |
 
+## Cross-arm comparison
+
+The arms were declared across three experiments and never put in one table. This
+is that table. It was a fair criticism: naming arms is not comparing them, and a
+result recorded only in prose is a claim, not evidence.
+
+Four arms have now been measured on the same subject — the kagent objects in this
+cluster and the references between them:
+
+| Arm | Store | Embedder | Measured in |
+|---|---|---|---|
+| **N** | Qdrant, vector only | nomic-embed-text-v1.5, chunked | [lab4/evaluation.md](../lab4/evaluation.md), [lab4/graph-evaluation.md](../lab4/graph-evaluation.md) |
+| **M** | Qdrant, vector only | all-MiniLM-L6-v2, unchunked | [lab4/evaluation.md](../lab4/evaluation.md) |
+| **G** | Qdrant + Neo4j | nomic, plus Cypher | [lab4/graph-evaluation.md](../lab4/graph-evaluation.md) |
+| **X** | xray-memory snapshot | nomic at 256 dims, catalog map | here |
+
+### Questions asked of more than one arm
+
+Only questions that were actually put to each arm appear here. Where an arm was
+never asked, the cell says so rather than guessing.
+
+| Question | N | M | G | X |
+|---|---|---|---|---|
+| Which component talks to the graph database? | hit | hit | not asked | **exact** (7 calls, 49K) |
+| Which agent answers questions about Helm? | hit | hit | not asked | **exact** (2 calls, 12K) |
+| Which MCP servers is nothing using? | **wrong** (8 searches) | not asked | **exact** (5 calls, graph only) | **exact** (14 calls, 121K) |
+| How many agents use *&lt;a given ModelConfig&gt;*? | **wrong** — said 2, truth 4 | not asked | **exact** — 4, named | **exact** — 7, named, `kind` selection |
+| Which agent uses Anthropic Claude? *(negative)* | correct (2 calls) | correct (6 calls) | not asked | **exact** (14 calls, 475K) — added a staleness caveat unprompted |
+| A password that is in the corpus *(negative)* | correct | correct — but **surfaced** a plaintext Neo4j password unasked | not asked | **leaked it on request**, then fixed by redaction |
+
+### Cost, where the same question was priced
+
+| Question | N | G | X |
+|---|---|---|---|
+| Which agent delegates to `k8s-agent`? | 1,178,890 | 62,454 | not asked |
+| Is there any object nothing references? | 2,313,311 | 33,448 | not asked |
+| Which MCP servers is nothing using? | not priced | not priced | 121,337 |
+| Which agent uses Anthropic Claude? | not priced | not priced | 475,203 |
+
+Token usage was only recorded from LAB4's graph experiment onward, so the cells
+that say "not priced" are gaps in the method, not zero-cost answers.
+
+### What the comparison supports
+
+**Set and count questions separate the arms, nothing else does.** Every arm
+answered plain retrieval and paraphrase correctly. The split appears only where
+the answer is a whole set: arm N was wrong twice, and arms G and X were exact —
+by two different mechanisms, Cypher and `kind` selection. Ranked retrieval
+answers "how many of these are among the ones I retrieved" and presents it as
+"how many there are."
+
+**Arm N's failures were confident.** It named a wrong count and a wrong unused
+server while citing metadata. Nothing in the answers marked them as partial.
+
+**Cost spans two orders of magnitude and does not track answer quality.** Arm N
+spent 2.31M tokens to give a worse answer than arm G gave for 33K. Arm X sits
+between them and rises steeply with the size of the nodes a question touches.
+
+**Negative controls separated the arms differently from everything else.** Arms
+N, M and G all refused to invent. Arm M surfaced a credential it was not asked
+for; arm X handed one over when asked directly. That is a property of what went
+into each corpus, not of the store — and it is the finding worth carrying into
+the next lab, not the retrieval scores.
+
+### What it does not support
+
+The four arms did not run against one frozen corpus. LAB4 measured 14 objects,
+LAB5 measured 12 and then 15, and the clusters were rebuilt between them. Arm X's
+nodes were also written as prose *for* retrieval, where arms N, M and G stored
+whole manifests.
+
+So this ranks approaches on a task, on corpora that resemble each other. It does
+not benchmark stores. A clean benchmark needs one corpus, frozen, ingested four
+ways, with token usage recorded from the first question — and ADR-0001's standing
+rule of ~200 queries against ~10K distractors, which none of these three labs
+came close to.
+
 ## Read the comparison carefully
 
 It is not a clean three-way. Two things differ besides the store, and both

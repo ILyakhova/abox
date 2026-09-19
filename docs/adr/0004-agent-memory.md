@@ -74,6 +74,26 @@ and 2.31M on comparable questions, its graph arm 62K and 33K. Tool-call count
 predicts cost poorly — the cost is in what a call returns, and `get_graph_node`
 returns a whole node.
 
+### Against the other arms
+
+Four approaches have now been measured on this subject: vector-only with two
+different embedders (N, M), vector plus graph (G), and the snapshot corpus here
+(X). The side-by-side table is in
+[`lab5/evaluation.md`](../../lab5/evaluation.md#cross-arm-comparison); it was
+added after review pointed out that the arms had been named across three
+experiments and never compared in one place.
+
+What it supports: **set and count questions are the only ones that separate
+them.** Every arm answered plain retrieval and paraphrase correctly. Arm N was
+wrong twice on questions whose answer is a whole set, while G and X were exact by
+two different mechanisms — Cypher and `kind` selection. Cost spans two orders of
+magnitude and does not track quality: arm N spent 2.31M tokens on a worse answer
+than arm G gave for 33K.
+
+What it does not support: a benchmark of stores. The arms ran against corpora
+that resembled each other rather than one frozen corpus, and arm X's nodes were
+written as prose *for* retrieval where the others held whole manifests.
+
 ## Encryption is not access control
 
 Asked for the Neo4j password, the agent returned it in plaintext. The corpus was
