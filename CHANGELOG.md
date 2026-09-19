@@ -252,6 +252,51 @@ results cannot separate.
   drift in the first place. A content hash on `vector_store` and a single ingest path that
   populates both stores together are the remedies named.
 
+- **ADR-0004 — agent memory**
+  ([docs/adr/0004-agent-memory.md](docs/adr/0004-agent-memory.md)).
+  ADR-0003 decided how abox retrieves; it left open that an agent which retrieves
+  still remembers nothing. `xray-memory` serves a pre-built snapshot over MCP and,
+  when writable, gives the agent a second map it writes into — the corpus is what
+  it knows, the notes are what it remembers.
+
+  LAB5 built a corpus by hand and measured an agent against it: the cluster's own
+  kagent topology, which is the same subject LAB4 measured through Qdrant and
+  Neo4j, so this is a third arm rather than an isolated result. Twelve questions,
+  twelve correct answers — and the findings that matter are the ones that survived
+  being right.
+
+  **Counting worked, by the right mechanism.** Asked how many agents exist, the
+  agent selected the whole set (`kind: "Agent"`) instead of ranking a page of it.
+  That is the class of question LAB4's vector-only arm answered confidently and
+  wrongly. It reached for the mechanism because the prompt says to, which is
+  ADR-0003's open risk appearing in a second place.
+
+  **Encryption turned out not to be access control.** Asked for the Neo4j
+  password, the agent returned it in plaintext while the corpus was age-encrypted
+  throughout. Encryption protects a snapshot from whoever pulls the image; it does
+  nothing about whoever asks the agent, and the MCP endpoint has no
+  authentication. The cause was an ingest script copying `env` as `key=value` —
+  and `neo4j-mcp` holds `NEO4J_MCP_PASSWORD` as a plain field, so the
+  never-ingest-`Secret` rule did not apply. **ADR-0003 had already recorded that a
+  kind-based exclusion list is not a control; the script was written a week later
+  and did not apply it.** Redaction now happens on the way in, by key name, and
+  was verified through the agent rather than by grepping the file.
+
+  **Freshness and retention are in conflict in the chart.** `seed` will not
+  overwrite a file the volume already holds, so replacing a corpus means deleting
+  the claim — and the notes live on that claim. Rebuilding the corpus during the
+  lab destroyed the agent's memory. The deployment as configured cannot hold both
+  a current corpus and a persistent memory, and nothing reports the loss.
+
+  **The notes map is shared, not per-agent.** `recall` returned a note written
+  earlier by a raw MCP client. One server-side store, every client that reaches
+  `/mcp`, no authentication — useful for surviving restarts, hazardous because an
+  agent presents whatever it finds there as its own recollection.
+
+  Voice and avatar front-ends were optional in the exercise and are deferred with
+  no work started; they are interface work over this decision rather than changes
+  to it.
+
 ### Cost
 
 Recorded per day and cumulatively, for planning.
@@ -263,7 +308,8 @@ Recorded per day and cumulatively, for planning.
 | 2026-09-15 | LAB4 — merging `feat/llmd-embeddings`, rebuild on Kubernetes 1.37, the official Qdrant MCP arm, the evaluation protocol | 88,000 |
 | 2026-09-15 (evening) | Running LAB4: the `structuredContent` defect, the search-depth correction, twelve questions through two agents, ADR-0001 corrected | 68,000 |
 | 2026-09-16 | Closing the task list, the graph arm, six relationship questions, ADR-0003 | 47,000 |
-| | **Cumulative** | **~451,000** |
+| 2026-09-19 | LAB5 — local cluster on WSL2, xray-memory, the corpus, encryption, twelve questions, ADR-0004 | 96,000 |
+| | **Cumulative** | **~547,000** |
 
 Day one's figure breaks down as roughly 54,600 on reading the repository, 32,900 on source
 material (six page fetches and four searches), 27,500 on writing, and 5,600 on verification.
