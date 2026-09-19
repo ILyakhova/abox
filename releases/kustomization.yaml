@@ -13,3 +13,4 @@ resources:
   - neo4j.yaml
   - phoenix.yaml
   - qdrant.yaml
+  - xray-memory.yaml
