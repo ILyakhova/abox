@@ -66,7 +66,22 @@ jq -c '
     text: ([ "MCPServer \(.metadata.name) in namespace \(.metadata.namespace)."
            , "Transport: \(.spec.transportType // "unknown")."
            , "Image: \(.spec.deployment.image // "none"), command: \(.spec.deployment.cmd // "default")."
-           , "Environment: \([.spec.deployment.env // {} | to_entries[] | "\(.key)=\(.value)"] | join(", "))."
+           # Values are redacted by KEY NAME, not by object kind. An earlier
+           # version of this script copied env as key=value and put
+           # NEO4J_MCP_PASSWORD=abox-neo4j into the corpus, where the agent
+           # returned it in plaintext when asked. Encrypting the snapshot did
+           # nothing about that: age protects the file from whoever pulls the
+           # image, not the content from whoever asks the agent -- and the MCP
+           # endpoint has no authentication in front of it.
+           #
+           # The kind-based rule this repository already had (never ingest
+           # Secret) was no help, because the credential was a plain field on an
+           # MCPServer. That is the finding in ADR-0003, written down and then
+           # not applied. Redact on the way IN; there is no way back out.
+           , "Environment: \([ .spec.deployment.env // {} | to_entries[]
+               | if (.key | test("PASSWORD|SECRET|TOKEN|KEY|CREDENTIAL|PASSWD|AUTH"; "i"))
+                 then "\(.key)=<redacted>"
+                 else "\(.key)=\(.value)" end ] | join(", "))."
            , "Memory limit: \(.spec.deployment.resources.limits.memory // "unset")."
            ] | join("\n")),
     attrs: {
