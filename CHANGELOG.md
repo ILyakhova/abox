@@ -297,6 +297,53 @@ results cannot separate.
   no work started; they are interface work over this decision rather than changes
   to it.
 
+- **LAB6 — the OpenTelemetry demo** ([lab6/observations.md](lab6/observations.md)).
+  Deployed from `feat/otel-demo` the intended way: merged and `make apply`, with the
+  cluster repointed at `releases-otel-demo`. Six questions written down before looking.
+
+  Traces cross 12 services and 130 spans in six languages without breaking. They split
+  at Kafka into separate traces joined by `FOLLOWS_FROM` links — correct messaging
+  semantics, but an operator reading the checkout trace sees `orders publish` and then
+  nothing. **A trace fetched too early is indistinguishable from a broken one**: the same
+  trace read 29 spans across 2 services, then 130 across 12 minutes later, with nothing
+  marking the first read as partial.
+
+  Sampling is off entirely. Metrics are derived from spans by the `span_metrics`
+  connector rather than collected separately, so traces and RED metrics cannot disagree.
+  There are four signals, not three — a `profiles` pipeline exports to firepit. The
+  `sanitize` processors do cardinality and naming hygiene, **not credential redaction**:
+  nothing in the reference observability deployment removes secrets from telemetry.
+
+  The demo's own `agent`/`mcp`/`chatbot` are instrumented through Traceloop (OpenLLMetry)
+  and were simply unexercised. Absence from a trace store does not distinguish "not
+  instrumented" from "not called".
+
+- **LAB7 — OTel, MLflow and Phoenix on identical traces**
+  ([lab7/comparison.md](lab7/comparison.md)).
+  A fan-out collector copies one agent's spans to all three, so the comparison is of the
+  tools rather than of the traffic.
+
+  Same spans, three levels of comprehension. **Jaeger** holds every `gen_ai.*` attribute
+  and understands none of them — it has all the token numbers and no way to add them up,
+  because it cannot tell which span was the model call. **MLflow** gives one row per
+  trace with a state and a duration. **Phoenix** classifies spans (`kind=llm`,
+  `kind=agent`) and extracts token counts onto them. These are not three implementations
+  of one thing: Jaeger answers a distributed-systems question, Phoenix an LLM one.
+
+  None of the three accepted telemetry out of the box, and each failed only in a
+  collector log: MLflow returned **403** on a Host check whose default allows localhost
+  and private IPs but not a cluster DNS name, and Phoenix rejected the export as
+  **Unauthenticated** — it is the only one of the three that authenticates ingest, which
+  matters because traces carry prompts and responses.
+
+  **kagent agents emit nothing and cannot be made to.** All ship with
+  `OTEL_TRACING_ENABLED=false`, and `kagent-tools` points at `host.docker.internal:4317`,
+  which does not resolve from a pod. The Agent CRD's `deployment.env` looks like the fix
+  and is not: the controller appends its own environment after the user's, Kubernetes
+  keeps the last value when a name repeats, and a direct Deployment patch is restored
+  immediately. So abox ships Phoenix for LLM observability and has no supported way to
+  send it anything.
+
 ### Cost
 
 Recorded per day and cumulatively, for planning.
@@ -308,8 +355,9 @@ Recorded per day and cumulatively, for planning.
 | 2026-09-15 | LAB4 — merging `feat/llmd-embeddings`, rebuild on Kubernetes 1.37, the official Qdrant MCP arm, the evaluation protocol | 88,000 |
 | 2026-09-15 (evening) | Running LAB4: the `structuredContent` defect, the search-depth correction, twelve questions through two agents, ADR-0001 corrected | 68,000 |
 | 2026-09-16 | Closing the task list, the graph arm, six relationship questions, ADR-0003 | 47,000 |
-| 2026-09-19 | LAB5 — local cluster on WSL2, xray-memory, the corpus, encryption, twelve questions, ADR-0004 | 96,000 |
-| | **Cumulative** | **~547,000** |
+| 2026-09-19 | LAB5 — local cluster on WSL2, xray-memory, the corpus, encryption, twelve questions, ADR-0004; LAB6 — the OpenTelemetry demo and its observations | 118,000 |
+| 2026-09-23 | LAB7 — the fan-out collector, getting traces into all three backends, the comparison | 112,000 |
+| | **Cumulative** | **~681,000** |
 
 Day one's figure breaks down as roughly 54,600 on reading the repository, 32,900 on source
 material (six page fetches and four searches), 27,500 on writing, and 5,600 on verification.
