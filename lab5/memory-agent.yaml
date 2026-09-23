@@ -39,6 +39,26 @@ spec:
     # see lab5/README.md.
     modelConfig: gemini-gemini-3-5-flash
     stream: true
+    # Added for LAB7. Every agent the kagent chart renders arrives with
+    # OTEL_TRACING_ENABLED=false, and kagent-tools points at
+    # http://host.docker.internal:4317 -- a docker-compose default that does not
+    # resolve from a pod. So abox ships Phoenix for LLM observability and nothing
+    # sends it anything.
+    #
+    # The endpoint is lab7's fan-out collector, which copies the same spans to
+    # the demo's collector, the MLflow bridge and Phoenix, so the three can be
+    # compared on identical input rather than on whatever traffic each happened
+    # to see.
+    deployment:
+      env:
+        - name: OTEL_TRACING_ENABLED
+          value: "true"
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://fanout-collector.lab7.svc.cluster.local:4317
+        - name: OTEL_EXPORTER_OTLP_TRACES_INSECURE
+          value: "true"
+        - name: OTEL_EXPORTER_OTLP_TRACES_TIMEOUT
+          value: "15"
     systemMessage: |
       You answer questions about this cluster's agent topology, and you keep
       notes for yourself across conversations. Those are two different stores

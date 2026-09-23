@@ -1,0 +1,130 @@
+# LAB7 — one agent's traces, delivered identically to all three backends.
+#
+# The comparison the lab asks for is between UIs and data models, not between
+# workloads. Pointing the agent at one backend at a time would give each a
+# different set of requests, and any difference found could then be a difference
+# in traffic rather than in the tool. So: one receiver, three exporters, the same
+# spans to each.
+#
+#   otel-collector.otel-demo:4317   the demo's own collector -> Jaeger
+#   otel-collector.mlflow:4317      the MLflow bridge -> mlflow-mlflow:5000
+#   phoenix-svc.phoenix:4317        Phoenix directly, it speaks OTLP itself
+#
+# Image is 0.160.0 because that is what the MLflow bridge already runs, so it is
+# present on the nodes and cannot surprise us with a pull.
+#
+# Nothing here ships. Hand-applied, like lab4 and lab5.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lab7
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fanout-collector
+  namespace: lab7
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      # No sampling and no filtering on purpose. Whatever the agent emits is what
+      # each backend gets; anything dropped here would be dropped from all three
+      # equally, but it would also mean comparing three views of an edited
+      # stream rather than of the agent.
+      memory_limiter:
+        check_interval: 5s
+        limit_percentage: 80
+        spike_limit_percentage: 25
+      batch: {}
+
+    exporters:
+      debug:
+        verbosity: basic
+      otlp/demo:
+        endpoint: otel-collector.otel-demo.svc.cluster.local:4317
+        tls:
+          insecure: true
+      otlp/mlflow:
+        endpoint: otel-collector.mlflow.svc.cluster.local:4317
+        tls:
+          insecure: true
+      otlp/phoenix:
+        endpoint: phoenix-svc.phoenix.svc.cluster.local:4317
+        tls:
+          insecure: true
+        # Phoenix is the only one of the three that authenticates its ingest
+        # endpoint. Without this it answers every export with
+        # `rpc error: code = Unauthenticated` and the collector drops the batch.
+        # The key comes from a Secret created by hand -- it is not in this repo
+        # and must not be.
+        headers:
+          authorization: "Bearer ${env:PHOENIX_API_KEY}"
+
+    service:
+      telemetry:
+        logs:
+          level: info
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          # An exporter that is down fails only its own leg; the others still
+          # deliver. That matters here -- if one backend is empty at the end,
+          # this collector's logs say whether it never received the spans or
+          # never accepted them.
+          exporters: [otlp/demo, otlp/mlflow, otlp/phoenix, debug]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fanout-collector
+  namespace: lab7
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: fanout-collector}
+  template:
+    metadata:
+      labels: {app: fanout-collector}
+    spec:
+      containers:
+        - name: collector
+          image: otel/opentelemetry-collector-contrib:0.160.0
+          args: ["--config=/etc/otel/config.yaml"]
+          ports:
+            - {containerPort: 4317, name: otlp-grpc}
+            - {containerPort: 4318, name: otlp-http}
+          env:
+            - name: PHOENIX_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: phoenix-ingest
+                  key: api-key
+          volumeMounts:
+            - {name: config, mountPath: /etc/otel}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+      volumes:
+        - name: config
+          configMap: {name: fanout-collector}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fanout-collector
+  namespace: lab7
+spec:
+  selector: {app: fanout-collector}
+  ports:
+    - {name: otlp-grpc, port: 4317, targetPort: 4317}
+    - {name: otlp-http, port: 4318, targetPort: 4318}
