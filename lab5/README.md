@@ -64,6 +64,17 @@ map anyway on the strength of matching dimensions — logging "assuming same
 model". True here; it would look identical for a different 256-dim model whose
 vectors do not line up. `make-map.sh` spells the label out.
 
+**`servicemap` gives each node 30 seconds, and a slow embedder cannot meet
+it.** It sends one request per node, all at once, with a hard client timeout
+and no flag or environment variable to raise it. On the WSL2 machine used after
+2026-09-24 the local embedder manages ~90 tokens/s on long inputs, so the
+1400–1900-token agent nodes fail with `context deadline exceeded`. Not the
+thread count (4 and 8 threads measured the same) and not cluster load (it failed
+with the load generator stopped). `make-map-cached.sh` puts
+`embed-cache-proxy.py` in front of the embedder: the first run times out but
+fills the cache, the second is answered from it. Same embedder, same vectors,
+same fingerprint.
+
 **`keygen` must run as your own uid.** It writes mode 0600, so a key created by
 the image's uid 65532 cannot afterwards be read, moved or chmod'ed by the person
 whose key it is.
