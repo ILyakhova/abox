@@ -88,12 +88,27 @@ string. An eval set expecting `{}` scores 0, which is the metric doing its job.
 
 | Agent | Question | `tool_trajectory_avg_score` | `rubric_based_final_response_quality_v1` |
 |---|---|---|---|
-| helm-agent | What Helm releases are installed? | **1.0 PASSED** | **1.0 PASSED** once; then 503 from the judge (Gemini "high demand") on 3.5 and 3.6 |
+| helm-agent | What Helm releases are installed? | **1.0 PASSED** | **1.0 PASSED** (judge `gemini-3.8-flash`) |
 
-The judge makes five calls per invocation, so a transient 503 on any of them
-fails the metric. That is a property of running an LLM judge against a shared
-free-tier model, and it belongs in any claim about how repeatable these scores
-are.
+**Choosing a judge model was its own small experiment**, all on 2026-09-24:
+
+| Judge | Result |
+|---|---|
+| `gemini-3.5-flash` | 1.0 PASSED once, then 503 "high demand" on every retry |
+| `gemini-3.6-flash` | 503 |
+| `gemini-3.7-flash` | 503 on the third of five samples |
+| `gemini-3.8-flash` | **1.0 PASSED**, then 503 on the very next run |
+| `gemini-2.5-flash` | 404 "no longer available to new users" — although `models.list` still returns it |
+
+No model is "the one that works": each flash model passed or failed depending
+on the minute. The judge makes five calls per invocation, and one 503 among
+them fails the whole metric. The agent, meanwhile, reached the same `gemini-3.5-flash` without
+trouble through the OpenAI-compatible endpoint while the judge's native-API
+calls were refused — not investigated further. Either way, a judged score here
+is only as repeatable as the judge model's availability, and that belongs in
+any claim made with it. `2.5-flash` is also agentevals' own default judge
+(ADK's `JudgeModelOptions`), so an evaluator config that names no model fails
+out of the box for a new Gemini key.
 
 ## What is hand-patched and reverts
 
