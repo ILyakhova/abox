@@ -1,0 +1,14 @@
+{
+  "eval_set_id": "abox_k8s_failed_helmrelease",
+  "name": "abox k8s-agent: HelmReleases that are not Ready",
+  "description": "IN_ORDER: the listing call must happen; a follow-up describe is allowed, not required.",
+  "eval_cases": [{
+    "eval_id": "k8s_failed_helmrelease",
+    "conversation": [{
+      "invocation_id": "k8s_failed_helmrelease_inv_1",
+      "user_content": {"role": "user", "parts": [{"text": "Is any HelmRelease in the cluster not Ready? Name it and say why."}]},
+      "final_response": {"role": "model", "parts": [{"text": "Four are not Ready: triage-agent, triage-core and triage-ui (private GHCR packages, missing ghcr-credentials) and xray-memory (its pod cannot mount the missing Secret xray-memory-auth)."}]},
+      "intermediate_data": {"tool_uses": [{"name": "k8s_get_resources", "args": {"all_namespaces": "true", "resource_type": "helmrelease"}, "id": "call_expected_1"}]}
+    }]
+  }]
+}

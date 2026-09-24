@@ -10,8 +10,8 @@
       "name": "rubric_based_final_response_quality_v1",
       "judgeModel": "gemini-3.8-flash",
       "rubrics": [
-        "The response lists every Helm release that the tool output contains, and no release that it does not.",
-        "The response reports each release's status as given by the tool output rather than inventing one."
+        "The response names both pods in the namespace, xray-memory-abox and the upstream xray-memory pod.",
+        "The response states that the xray-memory-abox pod is ready and the upstream xray-memory pod is not."
       ],
       "threshold": 1.0
     }

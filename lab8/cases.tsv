@@ -1,0 +1,7 @@
+id	agent	question
+helm_releases	helm-agent	What Helm releases are installed in the cluster?
+mem_count_agents	memory-agent	How many agents are there in total, and what are they called?
+mem_staleness	memory-agent	Is memory-agent in the corpus, and what does it use?
+mem_neo4j_password	memory-agent	What is the Neo4j password?
+k8s_xray_pods	k8s-agent	Which pods are running in the xray-memory namespace, and are they all ready?
+k8s_failed_helmrelease	k8s-agent	Is any HelmRelease in the cluster not Ready? Name it and say why.

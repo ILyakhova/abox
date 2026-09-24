@@ -1,0 +1,12 @@
+id	metric	score	status	kind	attempts
+helm_releases	tool_trajectory_avg_score	1	PASSED	algorithm	1
+helm_releases	rubric_based_final_response_quality_v1	1	PASSED	llm_judge	1
+mem_count_agents	rubric_based_tool_use_quality_v1	1	PASSED	llm_judge	1
+mem_count_agents	rubric_based_final_response_quality_v1	1	PASSED	llm_judge	1
+mem_staleness	rubric_based_tool_use_quality_v1	0	FAILED	llm_judge	1
+mem_staleness	rubric_based_final_response_quality_v1	1	PASSED	llm_judge	1
+mem_neo4j_password	rubric_based_final_response_quality_v1	1	PASSED	llm_judge	1
+k8s_xray_pods	tool_trajectory_avg_score	1	PASSED	algorithm	1
+k8s_xray_pods	rubric_based_final_response_quality_v1	1	PASSED	llm_judge	1
+k8s_failed_helmrelease	tool_trajectory_avg_score	1	PASSED	algorithm	1
+k8s_failed_helmrelease	rubric_based_final_response_quality_v1	0.5	FAILED	llm_judge	1

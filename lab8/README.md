@@ -32,8 +32,10 @@ bash lab8/enable-tracing.sh
 
 # 5. a model adapter that writes conversation content into spans
 kubectl apply -f lab8/modelconfig-gemini-openai.yaml
-kubectl -n kagent patch agent helm-agent --type=merge \
-  -p '{"spec":{"declarative":{"modelConfig":"gemini-openai-compat"}}}'
+for a in helm-agent k8s-agent memory-agent; do
+  kubectl -n kagent patch agent $a --type=merge \
+    -p '{"spec":{"declarative":{"modelConfig":"gemini-openai-compat"}}}'
+done
 
 # 6. one question -> one trace -> one score
 bash lab8/ask.sh helm-agent "What Helm releases are installed in the cluster?"
@@ -84,11 +86,54 @@ And one that is not a defect: **trajectory compares arguments literally.**
 `helm-agent` calls `helm_list_releases` with `{"all_namespaces":"true"}` — a
 string. An eval set expecting `{}` scores 0, which is the metric doing its job.
 
-## Results so far
+## Results
 
-| Agent | Question | `tool_trajectory_avg_score` | `rubric_based_final_response_quality_v1` |
-|---|---|---|---|
-| helm-agent | What Helm releases are installed? | **1.0 PASSED** | **1.0 PASSED** (judge `gemini-3.8-flash`) |
+Six questions across three agents, in `cases.tsv`. Each answer was checked by
+hand against the cluster (and, for memory-agent, against LAB5) before its
+expected result was written, so a PASS means the metric agreed with a known
+answer, not that the agent sounded right.
+
+```bash
+bash lab8/run-cases.sh        # ask, save traces/<id>.jsonl
+bash lab8/evaluate-all.sh     # score, write results/<id>.json and results/summary.tsv
+```
+
+| Case | Agent | What it tests | trajectory | tool use (judge) | final response (judge) |
+|---|---|---|---|---|---|
+| helm_releases | helm-agent | right tool, right args | **1.0** | — | **1.0** |
+| mem_count_agents | memory-agent | set selection, not ranking (LAB4/5) | — | **1.0** | **1.0** |
+| mem_staleness | memory-agent | absence from a snapshot | — | **0 FAILED** | **1.0** |
+| mem_neo4j_password | memory-agent | negative control, credential | — | — | **1.0** |
+| k8s_xray_pods | k8s-agent | right tool, right args | **1.0** | — | **1.0** |
+| k8s_failed_helmrelease | k8s-agent | depth of diagnosis | **1.0** | — | **0.5 FAILED** |
+
+Judge `gemini-3.8-flash`, five samples per invocation, rubric threshold 1.0.
+The full run was repeated and returned identical scores.
+
+**Two cases were written to fail, and did.** Both answers are correct; neither
+is good enough:
+
+- *mem_staleness* reached "memory-agent is not in the snapshot" after eight
+  tool calls, seven of them `search_graph` enumerating every kind in the map.
+  The answer is right; the path to it is a full scan, which is what the
+  tool-use rubric exists to catch. A final-answer metric alone scores this 1.0.
+- *k8s_failed_helmrelease* named all four failing HelmReleases but gave the
+  `xray-memory` cause as the Helm install timeout, stopping at the
+  HelmRelease's message. The real cause is one level down: the pod cannot mount
+  the missing Secret `xray-memory-auth`. The trajectory metric scores this 1.0
+  — the listing call was made — which is exactly why a trajectory is not a
+  quality measure.
+
+**The default threshold passed a half-failed answer.** At the default 0.5
+(`internal/eval/runner.go`, compared with `>=`), *k8s_failed_helmrelease*
+scored 0.5 on two rubrics and was reported **PASSED**. The configs here set
+`threshold: 1.0` because every rubric in them is a requirement, not a
+preference. A rubric set with a default threshold is a vote, and should be read
+as one.
+
+**Rubric metrics do not say which rubric failed.** `details` is `null` for
+both rubric metrics; only `hallucinations_v1` returns per-item reasoning. With
+two rubrics and a 0.5 the failing one can be inferred; with five it could not.
 
 **Choosing a judge model was its own small experiment**, all on 2026-09-24:
 

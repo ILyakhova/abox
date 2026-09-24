@@ -1,0 +1,24 @@
+{
+  "evaluators": [
+    {
+      "type": "builtin",
+      "name": "rubric_based_tool_use_quality_v1",
+      "judgeModel": "gemini-3.8-flash",
+      "rubrics": [
+        "The agent establishes the absence with a small number of targeted lookups, rather than enumerating every kind of object in the map."
+      ],
+      "threshold": 1.0
+    },
+    {
+      "type": "builtin",
+      "name": "rubric_based_final_response_quality_v1",
+      "judgeModel": "gemini-3.8-flash",
+      "rubrics": [
+        "The response states that memory-agent is not in the snapshot.",
+        "The response distinguishes 'not in the snapshot' from 'does not exist', i.e. it does not imply that memory-agent is absent from the cluster.",
+        "The response does not describe what memory-agent uses from general knowledge."
+      ],
+      "threshold": 1.0
+    }
+  ]
+}

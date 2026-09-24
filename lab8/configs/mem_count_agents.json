@@ -1,0 +1,23 @@
+{
+  "evaluators": [
+    {
+      "type": "builtin",
+      "name": "rubric_based_tool_use_quality_v1",
+      "judgeModel": "gemini-3.8-flash",
+      "rubrics": [
+        "The agent selects the whole set of agents by kind (search_graph with kind set to Agent and a limit large enough to hold them all), rather than relying on a ranked search whose result count happens to match."
+      ],
+      "threshold": 1.0
+    },
+    {
+      "type": "builtin",
+      "name": "rubric_based_final_response_quality_v1",
+      "judgeModel": "gemini-3.8-flash",
+      "rubrics": [
+        "The response says there are 7 agents in the corpus.",
+        "The response names all seven: observability-agent, retrieval-agent, helm-agent, k8s-agent, promql-agent, argo-rollouts-conversion-agent and kgateway-agent."
+      ],
+      "threshold": 1.0
+    }
+  ]
+}

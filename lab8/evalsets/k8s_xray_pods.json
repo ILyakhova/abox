@@ -1,0 +1,13 @@
+{
+  "eval_set_id": "abox_k8s_xray_pods",
+  "name": "abox k8s-agent: pods in xray-memory",
+  "eval_cases": [{
+    "eval_id": "k8s_xray_pods",
+    "conversation": [{
+      "invocation_id": "k8s_xray_pods_inv_1",
+      "user_content": {"role": "user", "parts": [{"text": "Which pods are running in the xray-memory namespace, and are they all ready?"}]},
+      "final_response": {"role": "model", "parts": [{"text": "Two pods: xray-memory-abox is ready (2/2, Running); the upstream xray-memory pod is not ready (0/2, Init:0/2)."}]},
+      "intermediate_data": {"tool_uses": [{"name": "k8s_get_resources", "args": {"namespace": "xray-memory", "resource_type": "pod"}, "id": "call_expected_1"}]}
+    }]
+  }]
+}
