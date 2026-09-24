@@ -223,6 +223,40 @@ will not come back from a clone:
 - `~/.config/xray-memory/snapshot.key` — the age identity; without it the
   encrypted corpus cannot be opened
 
+## Pausing it without losing anything
+
+`make down` destroys the nodes and every volume on them. To stop and come back
+to the same state — corpus, agent notes, agentevals run history, every hand
+patch — stop the node containers instead. Everything that matters lives either
+in etcd (ConfigMaps, patched ModelConfigs and Agents, the pinned input
+provider, CoreDNS) or on local-path volumes inside the node containers, and
+both survive a container stop.
+
+```bash
+# pause (from the Ubuntu terminal)
+docker stop abox-worker abox-worker2 abox-control-plane
+# then quit Docker Desktop if the machine is needed for something else
+```
+
+The nodes restart on their own only after a *crash*: their policy is
+`on-failure:1`, which is why they came back by themselves after the
+2026-09-24 reboot (exit 255) — and why they will **not** after a clean
+`docker stop`. Start them explicitly:
+
+```bash
+# resume
+# 1. Docker Desktop running; Avast Web Shield off (it breaks TLS to the cluster)
+docker start abox-control-plane abox-worker abox-worker2
+kind get kubeconfig --name abox > /mnt/c/Users/iryna/.kube/abox.config
+kubectl get nodes                                   # Ready within a minute or two
+kubectl get pods -A | grep -vE 'Running|Completed'  # expected: triage-*, upstream xray-memory
+# pods left in Unknown / ImagePullBackOff: delete them, their Deployments recreate them
+```
+
+Do **not** run `make run`, `make apply` or `make down` on resume: the first two
+reset the release pin (`releases-image` back to `>=0.0.0`) and re-apply the
+bootstrap; the third deletes everything.
+
 ## Stopping it again
 
 ```bash
