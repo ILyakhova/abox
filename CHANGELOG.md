@@ -388,11 +388,13 @@ Recorded per day and cumulatively, for planning.
 | 2026-09-16 | Closing the task list, the graph arm, six relationship questions, ADR-0003 | 47,000 |
 | 2026-09-19 | LAB5 — local cluster on WSL2, xray-memory, the corpus, encryption, twelve questions, ADR-0004; LAB6 — the OpenTelemetry demo and its observations | 118,000 |
 | 2026-09-23 | LAB7 — the fan-out collector, getting traces into all three backends, the comparison | 112,000 |
-| 2026-09-24 | Cluster rebuild, LAB5 restored, LAB8 — agentevals, six scored cases, the roadmap | 438,000 ¹ |
-| | **Cumulative** | **~1,119,000** |
+| 2026-09-24 | Cluster rebuild, LAB5 restored, LAB8 — agentevals, six scored cases, the roadmap | 630,254 ¹ |
+| | **Cumulative** | **~1,311,000** |
 
-¹ Context in use at the end of the session (437.6K of 1M), read from the client's
-context-usage panel — not a billed-token count. The day was unusually expensive for a
+¹ Counted from the session transcript: new input (uncached plus cache writes) and output
+over 248 model calls — 428,099 in, 202,155 out; cache reads (63.2M) are not included.
+The earlier rows were not counted this way and are not directly comparable with this
+one. The day was unusually expensive for a
 reason outside the labs: the internet connection dropped repeatedly, and a large share
 of the session went on troubleshooting its side effects rather than on the work — a
 half-destroyed cluster, Docker Desktop's DNS proxy going silent twice (fixed by pointing
