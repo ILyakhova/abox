@@ -131,6 +131,21 @@ scored 0.5 on two rubrics and was reported **PASSED**. The configs here set
 preference. A rubric set with a default threshold is a vote, and should be read
 as one.
 
+**`hallucinations_v1` cannot be used on a tool-using agent.** Run on
+*k8s_failed_helmrelease* (`configs/hallucinations.json`, judge
+`gemini-3.8-flash`), it scored **0.04 FAILED**: 23 of 24 sentences
+`unsupported` (the 24th was `not_applicable`), each with the rationale "the context does not contain any
+information about the cluster" — including sentences the agent copied verbatim
+from `k8s_describe_resource`'s output. The metric's context is the agent's
+instructions, the user prompt and the tool *definitions*; tool *results* are
+left out, deliberately matching ADK Python (agentevals' STATUS.md says so). So
+it measures "could the model have said this without its tools", and for an
+agent whose facts come from tools every fact fails. It did not single out the
+one weak sentence (the timeout-as-cause) either — it could not, with no tool
+output to compare against. It is the only metric that explains itself per
+sentence, which makes the failure easy to see and the score easy to misread.
+Result: `results/k8s_failed_helmrelease.hallucinations.json`.
+
 **Rubric metrics do not say which rubric failed.** `details` is `null` for
 both rubric metrics; only `hallucinations_v1` returns per-item reasoning. With
 two rubrics and a 0.5 the failing one can be inferred; with five it could not.

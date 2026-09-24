@@ -373,7 +373,9 @@ results cannot separate.
   The judge was the least reliable part: every Gemini flash model from 3.5 to 3.8
   returned 503 "high demand" at some point that day, and agentevals' default judge,
   `gemini-2.5-flash`, returns 404 for new keys while still appearing in `models.list`.
-  The roadmap orders eight fixes found this way ahead of any continuous evaluation.
+  `hallucinations_v1` marked 23 of 24 sentences of a correct, tool-grounded answer
+  unsupported: its context leaves tool results out, so every fact a tool supplied fails.
+  The roadmap orders nine fixes found this way ahead of any continuous evaluation.
 
 ### Cost
 

@@ -91,6 +91,18 @@ of requirements more often than a vote.
 *Done when:* a result can't be read as PASSED without also reading what it had
 to pass.
 
+**A9. Ground hallucination checks in tool results, as an option.**
+`hallucinations_v1` builds its context from instructions, the user prompt and
+tool definitions only, matching ADK Python. On *k8s_failed_helmrelease* that
+marked 23 of 24 sentences `unsupported` — including ones copied verbatim from a
+tool response — and scored 0.04; it could not pick out the one sentence that
+really was weak.
+*Proposal:* an evaluator option (`include_tool_responses: true`) that adds the
+invocation's tool results to the validator's context, off by default for
+fidelity with upstream, and the UI description saying which mode was used.
+*Done when:* the same trace scores the copied sentences `supported` and leaves
+the timeout-as-root-cause sentence as the one in question.
+
 **A8. Let `run` read what `serve` writes.**
 `agentevals run` only loads Jaeger JSON; `/api/streaming/get-trace` returns
 OTLP JSONL. The auto-detecting loader exists (`internal/loader`) and is only
@@ -195,9 +207,10 @@ where a team already pays for them; not a priority here.
 
 1. **A1, A2, A3** — without them kagent traffic cannot be scored without a
    person in the loop, so nothing continuous can start.
-2. **A4–A7** — without them a score cannot be trusted: a judge that 404s by
-   default, 503s read as failures, half-met requirements read as passes, and
-   failures with no reason.
+2. **A4–A7, A9** — without them a score cannot be trusted: a judge that 404s
+   by default, 503s read as failures, half-met requirements read as passes,
+   failures with no reason, and a hallucination score that fails every fact a
+   tool supplied.
 3. **B6 before B1** — capture and store conversation content only once it is
    authenticated, retained deliberately and redacted.
 4. **B1, B3**, then **B2** as soon as B1 shows its real cost.
