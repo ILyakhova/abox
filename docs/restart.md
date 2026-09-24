@@ -235,6 +235,9 @@ both survive a container stop.
 ```bash
 # pause (from the Ubuntu terminal)
 docker stop abox-worker abox-worker2 abox-control-plane
+# the load balancer cloud-provider-kind made for agentgateway (Envoy, stateless);
+# stop it, don't remove it -- nothing recreates it unless cloud-provider-kind runs
+docker stop $(docker ps -q --filter name=kindccm)
 # then quit Docker Desktop if the machine is needed for something else
 ```
 
@@ -247,6 +250,7 @@ The nodes restart on their own only after a *crash*: their policy is
 # resume
 # 1. Docker Desktop running; Avast Web Shield off (it breaks TLS to the cluster)
 docker start abox-control-plane abox-worker abox-worker2
+docker start $(docker ps -aq --filter name=kindccm)
 kind get kubeconfig --name abox > /mnt/c/Users/iryna/.kube/abox.config
 kubectl get nodes                                   # Ready within a minute or two
 kubectl get pods -A | grep -vE 'Running|Completed'  # expected: triage-*, upstream xray-memory
