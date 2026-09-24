@@ -1,0 +1,27 @@
+# LAB8 — Gemini through its OpenAI-compatible endpoint, so traces carry content.
+#
+# In kagent 0.10.1 only the OpenAI, Anthropic, Bedrock and Ollama model
+# adapters call telemetry.SetLLMRequestAttributes/SetLLMResponseAttributes
+# (go/adk/pkg/models/*.go). The Gemini provider does not, so its
+# generate_content spans carry token counts and no llm_request/llm_response --
+# and agentevals, which rebuilds the conversation from exactly those two
+# attributes, extracts zero invocations from them ("no converter-compatible ADK
+# LLM descendants"). OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true
+# changes nothing for the Gemini path; it only gates what the other adapters
+# write.
+#
+# Same key, same model family, different adapter. Uses the Secret lab5 already
+# asks for; the key name inside it is GEMINI_API_KEY, not OPENAI_API_KEY.
+---
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: gemini-openai-compat
+  namespace: kagent
+spec:
+  provider: OpenAI
+  model: gemini-3.5-flash
+  apiKeySecret: gemini-gemini-3-5-flash
+  apiKeySecretKey: GEMINI_API_KEY
+  openAI:
+    baseUrl: https://generativelanguage.googleapis.com/v1beta/openai/

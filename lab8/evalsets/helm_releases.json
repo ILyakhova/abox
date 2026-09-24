@@ -1,0 +1,14 @@
+{
+  "eval_set_id": "abox_helm_releases",
+  "name": "abox helm-agent: list releases",
+  "description": "One question, one expected tool call. Args are compared literally by tool_trajectory_avg_score: the agent sends all_namespaces as the STRING \"true\", and an expected {} scores 0.",
+  "eval_cases": [{
+    "eval_id": "helm_releases",
+    "conversation": [{
+      "invocation_id": "helm_releases_inv_1",
+      "user_content": {"role": "user", "parts": [{"text": "What Helm releases are installed in the cluster?"}]},
+      "final_response": {"role": "model", "parts": [{"text": "The Helm releases installed in the cluster are listed with name, namespace, revision, status and chart."}]},
+      "intermediate_data": {"tool_uses": [{"name": "helm_list_releases", "args": {"all_namespaces": "true"}, "id": "call_expected_1"}]}
+    }]
+  }]
+}

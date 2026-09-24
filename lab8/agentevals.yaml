@@ -1,0 +1,121 @@
+# LAB8 — agentevals-go, scoring kagent agents from their own OpenTelemetry
+# traces. Hand-applied like lab4/5/7: the cluster reconciles the upstream
+# artifact, and nothing in lab8/ ships.
+#
+# Adapted from deploy/k8s.yaml.example in github.com/triageagent-dev/evals
+# (built from commit 54107cf, see README.md). What was taken out, and why:
+#
+#   GitHub OAuth env   With none of AGENTEVALS_GITHUB_* set, every endpoint is
+#                      unauthenticated. Acceptable ONLY because there is no
+#                      HTTPRoute below: the UI and API are reached by
+#                      port-forward, the OTLP receivers by in-cluster DNS.
+#                      Traces carry prompts and responses -- the LAB7 finding
+#                      about Phoenix being the only authenticated ingest
+#                      applies here too, and this does not change it.
+#   Vertex AI env      No GCP project. The judge metrics use GEMINI_API_KEY
+#                      instead; safety_v1 and multi_turn_* (Vertex-only) are
+#                      unavailable.
+#   HTTPRoute          See the first point.
+#   imagePullSecrets   The image is built locally and side-loaded with
+#                      `kind load docker-image`, hence IfNotPresent.
+#
+# The judge key Secret is not in this file. lab8/README.md copies it from
+# kagent's gemini-gemini-3-5-flash rather than asking for the key again.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentevals
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: agentevals-go-session-db
+  namespace: agentevals
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentevals-go
+  namespace: agentevals
+  labels:
+    app: agentevals-go
+spec:
+  replicas: 1
+  # One RWO claim: Recreate, or a rollout onto another node deadlocks on
+  # Multi-Attach (the upstream example's own comment explains it).
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: agentevals-go
+  template:
+    metadata:
+      labels:
+        app: agentevals-go
+    spec:
+      # distroless:nonroot is uid 65532; without fsGroup SQLite cannot open
+      # its file on the root-owned claim.
+      securityContext:
+        fsGroup: 65532
+      containers:
+        - name: agentevals-go
+          image: agentevals-go:lab8
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - --addr=:8001
+            - --otlp-addr=:4318
+            - --otlp-grpc-addr=:4317
+            - --health-addr=:9090
+            - --session-db=/data/agentevals-go-sessions.db
+          env:
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agentevals-judge
+                  key: GEMINI_API_KEY
+                  optional: true
+          ports:
+            - {name: http, containerPort: 8001}
+            - {name: otlp-http, containerPort: 4318}
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: health, containerPort: 9090}
+          volumeMounts:
+            - {name: session-db, mountPath: /data}
+          readinessProbe:
+            httpGet: {path: /api/health, port: health}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /api/health, port: health}
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          resources:
+            requests: {cpu: 25m, memory: 32Mi}
+            # 128Mi upstream; a judge run holds whole traces and five samples
+            # per invocation, so give it room rather than find the OOM.
+            limits: {memory: 256Mi}
+      volumes:
+        - name: session-db
+          persistentVolumeClaim:
+            claimName: agentevals-go-session-db
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: agentevals-go
+  namespace: agentevals
+spec:
+  selector:
+    app: agentevals-go
+  ports:
+    - {name: http, port: 8001, targetPort: http}
+    - {name: otlp-http, port: 4318, targetPort: otlp-http}
+    - {name: otlp-grpc, port: 4317, targetPort: otlp-grpc}
+    - {name: health, port: 9090, targetPort: health}
