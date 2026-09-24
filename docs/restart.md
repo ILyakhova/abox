@@ -131,6 +131,24 @@ volumes. Pods left from before the reboot sit in `Unknown`, and anything that
 failed to pull meanwhile sits in `ImagePullBackOff`; deleting them lets their
 Deployments start fresh ones.
 
+**Docker Desktop's DNS proxy can stop answering while everything else works.**
+Seen twice on 2026-09-24: Windows and WSL resolve names, containers reach the
+internet by IP, and `192.168.65.254` — the resolver CoreDNS forwards to —
+times out. Inside the cluster it shows as `lookup <host> on 10.96.0.10:53:
+server misbehaving` (agents losing their model, Flux losing ghcr.io). Public
+resolvers work from the same containers, so CoreDNS was pointed at them:
+
+```bash
+kubectl -n kube-system get configmap coredns -o yaml > /tmp/coredns-backup.yaml
+kubectl -n kube-system get configmap coredns -o json \
+  | jq '.data.Corefile |= sub("forward \\. /etc/resolv\\.conf"; "forward . 8.8.8.8 1.1.1.1")' \
+  | kubectl apply -f -
+kubectl -n kube-system rollout restart deploy/coredns
+```
+
+Cluster-internal names are unaffected — CoreDNS answers `cluster.local`
+itself. Lives until the cluster is recreated.
+
 ## What will be lost
 
 Everything on a PersistentVolume. KinD's local-path volumes live inside the
