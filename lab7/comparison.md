@@ -66,6 +66,12 @@ keeps the last value when a name repeats. Patching the Deployment directly does
 not help either — the controller restores the duplicate immediately. The field
 exists and has no effect.
 
+> **Corrected in LAB8.** The controller's value is not fixed: it is copied from
+> ConfigMap `kagent-controller`, rendered from the chart's
+> `otel.tracing.enabled`. Patching the ConfigMap and restarting the controller
+> turns tracing on for every agent — see `lab8/enable-tracing.sh`. What this
+> section says about the CRD field stands; "cannot be made to" does not.
+
 ## The same trace, three ways
 
 The agent was switched from its placeholder LLM to Gemini through its

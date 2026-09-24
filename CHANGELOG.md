@@ -344,6 +344,37 @@ results cannot separate.
   immediately. So abox ships Phoenix for LLM observability and has no supported way to
   send it anything.
 
+  *Corrected in LAB8:* the override is real but the value comes from ConfigMap
+  `kagent-controller` (chart value `otel.tracing.enabled`), and patching that turns
+  tracing on for every agent. The conclusion above was right about the CRD field and
+  wrong about there being no way.
+
+- **LAB8 — scoring agents with agentevals** ([lab8/README.md](lab8/README.md),
+  [lab8/roadmap.md](lab8/roadmap.md)). agentevals-go built from source and run in the
+  cluster, kagent tracing pointed at it, six questions across helm-agent, k8s-agent and
+  memory-agent, each answer checked against the cluster before its expected result was
+  written. The release bundle was pinned to `0.11.36` for the lab.
+
+  Four things stood between a running agent and a score, and none was in the tool's
+  documentation. Tracing lives in the controller's ConfigMap, not the Agent CRD. **The
+  Gemini provider writes no conversation content into spans** — only kagent's OpenAI,
+  Anthropic, Bedrock and Ollama adapters do — so its traces yield zero invocations;
+  reaching Gemini through its OpenAI-compatible endpoint fixed it. agentevals groups
+  spans by conversation id, so one kagent request becomes two sessions and live scoring
+  never runs; and kagent's doubled `invoke_agent` becomes two invocations per question.
+
+  Two of the six cases were written to fail and did, both on answers that were correct:
+  a staleness answer reached by scanning the whole map, and a diagnosis that named every
+  failing HelmRelease but stopped at the timeout instead of the missing Secret beneath
+  it. The trajectory metric scored the second one 1.0 — a trajectory is not a quality
+  measure. The default rubric threshold of 0.5 first reported it **PASSED**; the configs
+  now require 1.0.
+
+  The judge was the least reliable part: every Gemini flash model from 3.5 to 3.8
+  returned 503 "high demand" at some point that day, and agentevals' default judge,
+  `gemini-2.5-flash`, returns 404 for new keys while still appearing in `models.list`.
+  The roadmap orders eight fixes found this way ahead of any continuous evaluation.
+
 ### Cost
 
 Recorded per day and cumulatively, for planning.
